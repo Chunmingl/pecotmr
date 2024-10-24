@@ -331,7 +331,7 @@ twas_pipeline <- function(twas_weights_data,
       return(NULL)
     }
   }
-  pick_best_model <- function(twas_data_combined, rsq_cutoff, rsq_pval_cutoff, rsq_option) {
+  pick_best_model <- function(twas_data_combined, rsq_cutoff, rsq_pval_cutoff, rsq_option, rsq_pval_option) {
     best_rsq <- rsq_cutoff
     # Determine if a gene/region is imputable and select the best model
     model_selection <- lapply(names(twas_data_combined$weights), function(context) {
@@ -347,7 +347,7 @@ twas_pipeline <- function(twas_weights_data,
       }
       for (model in available_models) {
         model_data <- twas_data_combined$twas_cv_performance[[context]][[model]]
-        if (model_data[, rsq_option] >= best_rsq) {
+        if (model_data[, rsq_option] >= best_rsq & model_data[, colnames(model_data)[which(colnames(model_data) %in% rsq_pval_option)]]<rsq_pval_cutoff ) {
           best_rsq <- model_data[, rsq_option]
           selected_model <- model
         }
@@ -389,7 +389,8 @@ twas_pipeline <- function(twas_weights_data,
         twas_weights_data[[weight_db]],
         rsq_cutoff = rsq_cutoff,
         rsq_pval_cutoff = rsq_pval_cutoff,
-        rsq_option = rsq_option
+        rsq_option = rsq_option,
+        rsq_pval_option=rsq_pval_option
       )
       twas_data_qced[[molecular_id]][["model_selection"]] <- setNames(best_model_selection, names(twas_weights_data[[weight_db]]$weights))
     } else {
