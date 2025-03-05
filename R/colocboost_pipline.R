@@ -30,7 +30,6 @@
 #' @param LD_meta_file_path_list A vector of path of LD_metadata, LD_metadata is a data frame specifying LD blocks with columns "chrom", "start", "end", and "path". "start" and "end" denote the positions of LD blocks. "path" is the path of each LD block, optionally including bim file paths.
 #' @param match_LD_sumstat A vector of index of sumstat matched to LD if mulitple sumstat files
 #' @param conditions_list_sumstat A vector of strings representing different sumstats.
-#' @param conditions_list_LD A vector of strings representing different LD reference for different sumstat
 #' @param n_sample User-specified sample size. If unknown, set as 0 to retrieve from the sumstat file.
 #' @param n_case User-specified number of cases.
 #' @param n_control User-specified number of controls.
@@ -92,11 +91,10 @@ load_multitask_regional_data <-  function(region, # a string of chr:start-end fo
                                            LD_meta_file_path_list = NULL,
                                            match_LD_sumstat = NULL, # a vector of index of sumstat matched to LD if mulitple sumstat files
                                            conditions_list_sumstat = NULL,
-                                           conditions_list_LD = NULL,
                                            subset = TRUE, 
-                                           n_sample = 0, 
-                                           n_case = 0, 
-                                           n_control = 0, 
+                                           n_samples = 0, 
+                                           n_cases = 0, 
+                                           n_controls = 0, 
                                            target = "",
                                            target_column_index = "", 
                                            comment_string = "#",
@@ -112,6 +110,7 @@ load_multitask_regional_data <-  function(region, # a string of chr:start-end fo
     individual_data <- NULL
     if (!is.null(genotype_list)){
         
+        #### FIXME: later if we have mulitple genotype list
         if (length(genotype_list)!=1 & is.null(match_geno_pheno)){
             stop("Data load error. Please make sure 'match_geno_pheno' exists if you load data from multiple individual-level data.")
         } else if (length(genotype_list)==1 & is.null(match_geno_pheno)){
@@ -119,7 +118,7 @@ load_multitask_regional_data <-  function(region, # a string of chr:start-end fo
         }
 
         # - load individual data from multiple datasets
-        n_dataset <- unique(match_geno_pheno)
+        n_dataset <- unique(match_geno_pheno) ### FIXME
         for (i_data in 1:n_dataset){
             # extract genotype file name
             genotype <- genotype_list[i_data]
@@ -156,17 +155,12 @@ load_multitask_regional_data <-  function(region, # a string of chr:start-end fo
     sumstat_data <- NULL
     if (!is.null(sumstat_path_list)){
         
-        if (length(LD_meta_file_path_list)!=1 & is.null(match_LD_sumstat)){
-            stop("Data load error. Please make sure 'match_LD_sumstat' exists if you load data from multiple sumstats.")
-        } else if (length(LD_meta_file_path_list)==1 & is.null(match_LD_sumstat)){
-            match_LD_sumstat <- rep(1, length(sumstat_path_list))
+        if (length(match_LD_sumstat)==0){ match_LD_sumstat[[1]] <- conditions_list_sumstat }
+        if (length(match_LD_sumstat)!=length(LD_meta_file_path_list)){
+            stop("Please make sure 'match_LD_sumstat' matched 'LD_meta_file_path_list' if you load data from multiple sumstats.")
         }
-        if (length(sumstat_path_list)==1&is.null(conditions_list_sumstat)) {conditions_list_sumstat = "LD_sumstat"}
-        if (length(LD_meta_file_path_list)==1&is.null(conditions_list_LD)) {conditions_list_LD = "LD"}
-        
-        
         # - load sumstat data from multiple datasets
-        n_LD <- unique(match_LD_sumstat)
+        n_LD <- length(match_LD_sumstat)
         for (i_ld in 1:n_LD){
             
             # extract LD meta file path name
@@ -175,14 +169,15 @@ load_multitask_regional_data <-  function(region, # a string of chr:start-end fo
                                       region = association_window, 
                                       extract_coordinates = extract_coordinates)
             # extract sumstat information
-            pos <- which(match_LD_sumstat == i_ld)
-            conditions <- conditions_list_sumstat[pos]
+            conditions <- match_LD_sumstat[[i_ld]]
+            pos <- match(conditions, conditions_list_sumstat)
             sumstats <- lapply(pos, function(ii){
                 sumstat_path <- sumstat_path_list[ii]
                 column_file_path <- column_file_path_list[ii]
+                # FIXME later: when consider multiple LD reference
                 tmp <- load_rss_data(
                     sumstat_path = sumstat_path, column_file_path = column_file_path,
-                    n_sample = n_sample, n_case = n_case, n_control = n_control, target = target, region = association_window,
+                    n_sample = n_samples[ii], n_case = n_cases[ii], n_control = n_controls[ii], target = target, region = association_window,
                     target_column_index = target_column_index, comment_string = comment_string)
                 if (!("variant_id" %in% colnames(tmp$sumstats))){
                     tmp$sumstats <- tmp$sumstats %>% rowwise() %>% mutate(variant_id = paste0(c(chrom,pos,A1,A2), collapse = ":"))
@@ -193,7 +188,7 @@ load_multitask_regional_data <-  function(region, # a string of chr:start-end fo
             sumstat_data$sumstats <- c(sumstat_data$sumstats, list(sumstats))
             sumstat_data$LD_info <- c(sumstat_data$LD_info, list(LD_info))
         }
-        names(sumstat_data$sumstats) <- names(sumstat_data$LD_info) <- conditions_list_LD
+        names(sumstat_data$sumstats) <- names(sumstat_data$LD_info) <- names(match_LD_sumstat)
     }
     
     return(list(individual_data = individual_data, 
@@ -213,8 +208,6 @@ load_multitask_regional_data <-  function(region, # a string of chr:start-end fo
 #' @param event_filters A list of pattern for filtering events based on context names. Example: for sQTL, list(type_pattern = ".*clu_(\\d+_[+-?]).*",valid_pattern = "clu_(\\d+_[+-?]):PR:",exclude_pattern = "clu_(\\d+_[+-?]):IN:")
 #' @param maf_cutoff A scalar to remove variants with maf < maf_cutoff, dafault is 0.005.
 #' @param pip_cutoff_to_skip_ind A vector of cutoff values for skipping analysis based on PIP values for each context. Default is 0.
-#' @param skip_region A character vector specifying regions to be skipped in the analysis (optional).
-#'                    Each region should be in the format "chrom:start-end" (e.g., "1:1000000-2000000").
 #' @param pip_cutoff_to_skip_sumstat A vector of cutoff values for skipping analysis based on PIP values for each sumstat Default is 0.
 #' @param qc_method Quality control method to use. Options are "rss_qc", "dentist", or "slalom" (default: "rss_qc").
 #' @param impute Logical; if TRUE, performs imputation for outliers identified in the analysis (default: TRUE).
@@ -237,11 +230,14 @@ load_multitask_regional_data <-  function(region, # a string of chr:start-end fo
 colocboost_analysis_pipline <- function(region_data, 
                                         target_trait = NULL,
                                         event_filters = NULL,
+                                        # - analysis
+                                        xqtl_coloc = TRUE,
+                                        joint_gwas = FALSE,
+                                        separate_gwas = FALSE,
                                         # - individual QC
                                         maf_cutoff = 0.0005, 
                                         pip_cutoff_to_skip_ind = 0,
                                         # - sumstat QC
-                                        skip_region = NULL,
                                         remove_indels = FALSE,
                                         pip_cutoff_to_skip_sumstat = 0,
                                         qc_method = c("rss_qc", "dentist", "slalom"),
@@ -302,49 +298,138 @@ colocboost_analysis_pipline <- function(region_data,
         return(filtered_events)
     }
     
+    # - extract contexts and studies from region data
+    extract_contexts_studies <- function(region_data, phenotypes_init=NULL){
+        
+        individual_data <- region_data$individual_data
+        sumstat_data = region_data$sumstat_data
+        
+        if (is.null(phenotypes_init)){
+            
+            # - inital setup
+            phenotypes <- list("individual_contexts" = NULL, "sumstat_studies" = NULL)
+            if (!is.null(individual_data)){
+                phenotypes$individual_contexts <- names(individual_data$residual_Y)
+            } else {
+                message("No individual data in this region!")
+            }
+            if (!is.null(sumstat_data)){
+                phenotypes$sumstat_studies <- sapply(sumstat_data$sumstats, function(ss) names(ss)) %>% unlist() %>% as.vector()
+            } else {
+                message("No sumstat data in this region!")
+            }
+            
+        } else {
+        
+            # - after QC
+            phenotypes <- list("individual_contexts" = NULL, "sumstat_studies" = NULL)
+            if (!is.null(individual_data)){
+                null_Y <- which(sapply(individual_data$Y, is.null))
+                if (length(null_Y) == 0){
+                    message("All individual data pass QC steps.")
+                    phenotypes$individual_contexts <- names(individual_data$Y)
+                } else if (length(null_Y) != length(individual_data$Y)) {
+                    message(paste("Skipping follow-up analysis for individual traits", 
+                                  paste(names(individual_data$Y)[null_Y], collapse = ";"), "after QC."))
+                    phenotypes$individual_contexts <- names(individual_data$Y)[-null_Y]
+                } else if (length(null_Y) == length(individual_data$Y)) {
+                    message("No individual data pass QC.")
+                }
+            } else {
+                message("No individual data pass QC.")
+            }
+            if (!is.null(sumstat_data)){
+                phenotypes$sumstat_studies <- names(sumstat_data$sumstats)
+                sumstat_studies_init <- phenotypes_init$sumstat_studies
+                if (length(sumstat_studies_init)==length(phenotypes$sumstat_studies)){
+                    message("All sumstat studies pass QC steps.")
+                } else {
+                    message(paste("Skipping follow-up analysis for sumstat studies", 
+                                  paste(setdiff(sumstat_studies_init, phenotypes$sumstat_studies), collapse = ";"), "after QC."))
+                }
+            } else {
+                message("No sumstat data pass QC.")
+            }
+        
+        }
+        return(phenotypes)
+        
+    }
     
-    # - QC for the region_data
+    ####### ========= initial output results before QC ======== #######
+    analysis_results <- list("xqtl_coloc" = NULL, "joint_gwas" = NULL, "separate_gwas" = NULL)
+    analysis_results$computing_time <- list("QC" = NULL, "Analysis" = list("xqtl_coloc" = NULL, "joint_gwas" = NULL, "separate_gwas" = NULL))
+    if (!xqtl_coloc & !joint_gwas & !separate_gwas){
+        message("No colocalization has been performed!")
+        return(analysis_results)
+    }
+    phenotypes_init <- extract_contexts_studies(region_data)
+    if (is.null(phenotypes_init$individual_contexts)&is.null(phenotypes_init$sumstat_studies)){ 
+        return(analysis_results)
+    }
+    if (!is.null(phenotypes_init$individual_contexts)){
+        analysis_results$xqtl_coloc <- list(NULL)
+    }
+    if (!is.null(phenotypes_init$sumstat_studies)){
+        analysis_results$joint_gwas <- list(NULL)
+        analysis_results$joint_gwas <- list(NULL)
+        if (length(phenotypes_init$sumstat_studies)>1){
+            analysis_results$separate_gwas <- vector("list", length(phenotypes_init$sumstat_studies)) %>% setNames(phenotypes_init$sumstat_studies)
+        } else {
+            analysis_results$separate_gwas[[1]] <- list(NULL)
+            names(analysis_results$separate_gwas) <- phenotypes_init$sumstat_studies
+        }
+    }
+                                                     
+    ####### ========= Filtering events before QC =========== #########
+    if (!is.null(event_filters)&!is.null(region_data$individual_data)){
+        Y <- region_data$individual_data$residual_Y
+        Y <- lapply(1:length(Y), function(i) {
+            y <- Y[[i]]
+            events <- colnames(y)
+            condition <- names(Y)[i]
+            filtered_events <- filter_events(events, event_filters, condition)
+            if (is.null(filtered_events)){ return(NULL) }
+            y[, filtered_events, drop = FALSE]
+        })  %>% setNames(names(region_data$individual_data$residual_Y))
+        region_data$individual_data$residual_Y <- Y
+    }                                        
+                                                     
+    ####### ========= QC for the region_data ======== ########
+    t01 <- Sys.time()
     region_data <- qc_regional_data(region_data, maf_cutoff = maf_cutoff, 
                                     pip_cutoff_to_skip_ind = pip_cutoff_to_skip_ind,
-                                    skip_region = skip_region,
                                     remove_indels = remove_indels,
                                     pip_cutoff_to_skip_sumstat = pip_cutoff_to_skip_sumstat,
                                     qc_method =qc_method,
                                     impute = impute, 
                                     impute_opts = impute_opts)
+    phenotypes_QC <- extract_contexts_studies(region_data, phenotypes_init = phenotypes_init)
+    t02 <- Sys.time()
+    analysis_results$computing_time$QC <- t02 - t01
     
-    # - individual level 
+    ####### ========= organize individual level data ======== ########
     individual_data <- region_data$individual_data
     if (!is.null(individual_data)) {
         X <- individual_data$X
         Y <- individual_data$Y
         null_Y <- which(sapply(Y, is.null))
         if (length(null_Y) != 0 & length(null_Y) != length(Y)) {
-            message(paste("Skipping follow-up analysis for individual traits", paste(names(Y)[null_Y], collapse = ";"), "."))
-            X <- X[-null_Y]
-            Y <- Y[-null_Y]
+            X <- X[-null_Y]; Y <- Y[-null_Y]
         } else if (length(null_Y) == length(Y)) {
-            message(paste("Skipping follow-up analysis for all individual traits", paste(names(Y)[null_Y], collapse = ";"), "."))
-            X <- NULL
-            Y <- NULL
+            X <- NULL; Y <- NULL
         }
         if (!is.null(Y)) {
             Y <- lapply(1:length(Y), function(i) {
                 y <- Y[[i]]
-                events <- colnames(y)
-                condition <- names(Y)[i]
-                if (!is.null(event_filters)){
-                    filtered_events <- filter_events(events, event_filters, condition)
-                    y <- y[, filtered_events, drop = FALSE]
-                } 
                 lapply(seq_len(ncol(y)), function(j) y[, j, drop = FALSE] %>% setNames(colnames(y)[j]))
             })
             dict_YX <- cbind(seq_along(Reduce("c", Y)), rep(seq_along(Y), sapply(Y, length)))
             Y <- Reduce("c", Y); Y <- Y %>% setNames(sapply(Y, colnames))
         }
-    } else {X <- Y <- dict_YX <- NULL }
+    } else { X <- Y <- dict_YX <- NULL }
     
-    # - summary statistics
+    ####### ========= organize summary statistics ======== ########
     sumstat_data = region_data$sumstat_data
     if (!is.null(sumstat_data)){
         sumstats <- lapply(sumstat_data$sumstats, function(ss){
@@ -360,27 +445,62 @@ colocboost_analysis_pipline <- function(region_data,
         })
         LD_match <- sumstat_data$LD_match
         dict_sumstatLD <- cbind(seq_along(sumstats), match(LD_match, names(sumstat_data$LD_mat)))
-    } else {sumstats <- LD_mat <- dict_sumstatLD <- NULL}
+    } else { sumstats <- LD_mat <- dict_sumstatLD <- NULL }
                                                      
-    if (is.null(X)&is.null(sumstats)){
-        stop("No data in this region!")
-    }
     
-    traits <- c(names(Y), names(sumstats))
-    if (!is.null(target_trait)){
-        if (!(target_trait%in%traits)){
-            stop(paste("Trying to run target version for target trait", target_trait, 
-                       ". But this target trait is not in analysis traits", paste0(traits, collapse = ";"), "."))
-        } else {
-            target_idx <- which(traits == target_trait)
+    ####### ========= streamline three types of analyses ======== ########
+    if (is.null(X)&is.null(sumstats)){
+        message("No data pass QC and will not perform analyses.")
+        return(analysis_results)   
+    }
+    # - run xQTL-only version of ColocBoost
+    if (xqtl_coloc&!is.null(X)){
+        message(paste("====== Performing xQTL-only ColocBoost on", length(Y), "contexts. ====="))
+        t11 <- Sys.time()
+        traits <- names(Y)
+        target_idx <- NULL
+        if (!is.null(target_trait)){
+            if (target_trait %in% traits){
+                target_idx <- which(traits == target_trait)
+            }
         }
-    } else { target_idx = NULL }
+        res_xqtl <- colocboost(X = X, Y = Y, dict_YX = dict_YX, 
+                               outcome_names = traits, target_idx = target_idx, ...)
+        t12 <- Sys.time()
+        analysis_results$xqtl_coloc <- res_xqtl
+        analysis_results$computing_time$Analysis$xqtl_coloc = t12 - t11
+    }
+    # - run joint GWAS no targeted version of ColocBoost
+    if (joint_gwas&!is.null(sumstats)){
+        message(paste("====== Performing non-targeted version GWAS-xQTL ColocBoost on", length(Y), "contexts and", length(sumstats), "GWAS. ====="))
+        t21 <- Sys.time()
+        traits <- c(names(Y), names(sumstats))
+        res_gwas <- colocboost(X = X, Y = Y, sumstat = sumstats, LD = LD_mat,
+                               dict_YX = dict_YX, dict_sumstatLD = dict_sumstatLD, 
+                               outcome_names = traits, target_idx = NULL, ...)
+        t22 <- Sys.time()
+        analysis_results$joint_gwas <- res_gwas
+        analysis_results$computing_time$Analysis$joint_gwas = t22 - t21
+    }          
+    # - run targeted version of ColocBoost for each GWAS
+    if (separate_gwas&!is.null(sumstats)){
+        t31 <- Sys.time()
+        res_gwas_separate <- analysis_results$separate_gwas
+        for (i_gwas in 1:nrow(dict_sumstatLD)){
+            current_study <- names(sumstats)[i_gwas] 
+            message(paste("====== Performing targeted version GWAS-xQTL ColocBoost on", length(Y), "contexts and ", current_study, "GWAS. ====="))
+            dict <- dict_sumstatLD[i_gwas,]
+            traits <- c(names(Y), current_study)
+            res_gwas_separate[[current_study]] <- colocboost(X = X, Y = Y, sumstat = sumstats[dict[1]], 
+                                                             LD = LD_mat[dict[2]], dict_YX = dict_YX, 
+                                                             outcome_names = traits, target_idx = length(traits), ...)
+        }
+        t32 <- Sys.time()
+        analysis_results$separate_gwas <- res_gwas_separate
+        analysis_results$computing_time$Analysis$separate_gwas = list("total" = t32 - t31, "n_studies" = nrow(dict_sumstatLD), "average" = (t32-t31)/nrow(dict_sumstatLD))
+    }                     
                                                      
-    res_cb <- colocboost(X = X, Y = Y, sumstat = sumstats, LD = LD_mat,
-                         dict_YX = dict_YX, dict_sumstatLD = dict_sumstatLD, 
-                         traits_names = traits, target_idx = target_idx, ...)
-                                                     
-    return(res_cb)                        
+    return(analysis_results)                        
 
 }
 
@@ -393,8 +513,6 @@ colocboost_analysis_pipline <- function(region_data,
 #' @param region_data A region data loaded from \code{load_regional_data}.
 #' @param maf_cutoff A scalar to remove variants with maf < maf_cutoff, dafault is 0.005.
 #' @param pip_cutoff_to_skip_ind A vector of cutoff values for skipping analysis based on PIP values for each context. Default is 0.
-#' @param skip_region A character vector specifying regions to be skipped in the analysis (optional).
-#'                    Each region should be in the format "chrom:start-end" (e.g., "1:1000000-2000000").
 #' @param pip_cutoff_to_skip_sumstat A vector of cutoff values for skipping analysis based on PIP values for each sumstat Default is 0.
 #' @param qc_method Quality control method to use. Options are "rss_qc", "dentist", or "slalom" (default: "rss_qc").
 #' @param impute Logical; if TRUE, performs imputation for outliers identified in the analysis (default: TRUE).
@@ -419,7 +537,6 @@ qc_regional_data <- function(region_data,
                              maf_cutoff = 0.0005, 
                              pip_cutoff_to_skip_ind = 0,
                              # - sumstat
-                             skip_region = NULL,
                              remove_indels = FALSE,
                              pip_cutoff_to_skip_sumstat = 0,
                              qc_method = c("rss_qc", "dentist", "slalom"),
@@ -432,6 +549,7 @@ qc_regional_data <- function(region_data,
     add_context_to_Y <- function(res_Y){
         res <- lapply(1:length(res_Y), function(iy){
             y <- res_Y[[iy]]
+            if (is.null(y)) return(NULL)
             if (is.null(colnames(y))){ 
                 colnames(y) <- names(res_Y)[iy] 
             } else {
@@ -458,7 +576,7 @@ qc_regional_data <- function(region_data,
             if (length(include_idx)==0){
                 message(paste("Skipping follow-up analysis for individual-context", context,  
                               ". No signals above PIP threshold", pip_cutoff_to_skip, "in initial model screening."))
-                return(list())
+                return(NULL)
             } else if (length(include_idx) == ncol(res_Y)) {
                 message(paste("Keep all individual-phenotypes in context", context,  "."))
             } else {
@@ -491,6 +609,7 @@ qc_regional_data <- function(region_data,
             resY <- Y[[i_context]]
             maf <- MAF[[i_context]]
             context <- names(Y)[i_context]
+            if (is.null(resY)) next
             # - remove variants with maf < maf_cutoff
             # tmp <- filter_resX_maf(resX, maf, maf_cutoff = maf_cutoff)
             resX <- filter_X(resX, missing_rate_thresh=NULL, maf_thresh=maf_cutoff, maf=maf)
@@ -504,7 +623,7 @@ qc_regional_data <- function(region_data,
         }
         if (length(keep_contexts)==0){
             message(paste("Skipping follow-up analysis for all contexts."))
-            return(list())
+            return(NULL)
         } else {
             message(paste("Region includes the following contexts after inital screening:", paste(keep_contexts, collapse = ";"),  "."))
             names(residual_X) <- names(residual_Y) <- keep_contexts
@@ -530,30 +649,29 @@ qc_regional_data <- function(region_data,
     }
     
                                       
-    # Initial PIP check for summary statistics         
+    # Initial PIP check for summary statistics    
+    ##### FIXME later: i would like to combine initial screen and sumstat qc!
     data_initial_screen_sumstat <- function(
         sumstat_data,
-        skip_region = NULL,
         remove_indels = FALSE,
         pip_cutoff_to_skip = 0){
 
 
         n_LD <- length(sumstat_data$LD_info)
-        conditions_sumstat <- names(pip_cutoff_to_skip_sumstat)
+        conditions_sumstat <- names(pip_cutoff_to_skip)
         for (i in 1:n_LD){
             LD_data <- sumstat_data$LD_info[[i]]
             sumstats <- sumstat_data$sumstats[[i]]
             # Initial PIP check
-            if (all(pip_cutoff_to_skip != 0)){
-                ld_condition <- names(sumstat_data$LD_info)[i]
-                pos <- grepl(ld_condition, conditions_sumstat)
+            if (any(pip_cutoff_to_skip != 0)){
+                pos <- match(names(sumstats), conditions_sumstat)
                 pip_cutoff_to_skip_ld <- pip_cutoff_to_skip[pos]
 
                 check_model_pip <- sapply(1:length(sumstats), function(ii){
                     sumstat <- sumstats[[ii]]
                     n <- sumstat$n
                     var_y = sumstat$var_y
-                    preprocess_results <- rss_basic_qc(sumstat$sumstats, LD_data, skip_region = skip_region, remove_indels = remove_indels)
+                    preprocess_results <- rss_basic_qc(sumstat$sumstats, LD_data, remove_indels = remove_indels)
                     sumstat <- preprocess_results$sumstats
                     LD_mat <- preprocess_results$LD_mat   
                     pip <- susie_rss_wrapper(z = sumstat$z, R = LD_mat, L = 1,
@@ -565,16 +683,17 @@ qc_regional_data <- function(region_data,
                     any(pip > pip_cutoff_to_skip_ld[ii])
                 })
                 include_idx <- which(check_model_pip)
+                ld_condition <- names(sumstat_data$LD_info)[i]
                 if (length(include_idx)==0){
-                    message(paste("Skipping follow-up analysis for all summary statistic based on LD -", ld_condition,  
+                    message(paste("Skipping follow-up analysis for all summary statistic based on LD", ld_condition,  
                                   ". No signals above PIP threshold", paste0(pip_cutoff_to_skip_ld,";"), "in initial model screening."))
                     sumstat_data$sumstats[i] <- list(NULL)
                 } else if (length(include_idx) == length(sumstats)) {
-                    message(paste("Keep all summary statistics based on LD -", ld_condition,  "."))
+                    message(paste("Keep all summary statistics based on LD", ld_condition,  "."))
                 } else {
                     exclude_idx <- setdiff(1:length(sumstats), include_idx)
                     exclude_pheno <- paste(names(sumstats)[exclude_idx], collapse = ";")
-                    message(paste("Skipping follow-up analysis for summary statistics", exclude_pheno, "based on LD -", ld_condition,  
+                    message(paste("Skipping follow-up analysis for summary statistics", exclude_pheno, "based on LD", ld_condition,  
                                   ". No signals above PIP threshold", paste0(pip_cutoff_to_skip_ld[exclude_idx],";"), "in initial model screening."))
                     sumstat_data$sumstats[[i]] <- sumstats[include_idx]
                 }
@@ -592,26 +711,33 @@ qc_regional_data <- function(region_data,
     #   \item LD_match: A vector of strings to indicating sumstats and LD matching (save space since multiple sumstats may link to the same LD matrix).
     # } 
     summary_stats_qc_multitask <- function(sumstat_data,
+                                           remove_indels = FALSE,
                                            qc_method = c("rss_qc", "dentist", "slalom"),
                                            impute = TRUE, 
                                            impute_opts = list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5, lamb = 0.01)){
 
         n_LD <- length(sumstat_data$LD_info)
-        conditions_sumstat <- names(pip_cutoff_to_skip_sumstat)
+        conditions_sumstat <- sapply(sumstat_data$sumstats, function(ss) names(ss)) %>% unlist() %>% as.vector()
         final_sumstats <- final_LD <- list()
         LD_match <- c()
         for (i in 1:n_LD){
             LD_data <- sumstat_data$LD_info[[i]]
             sumstats <- sumstat_data$sumstats[[i]]
-            ld_condition <- names(sumstat_data$LD_info)[i]
-            pos <- grepl(ld_condition, conditions_sumstat)
-            conditions_sumstat_ld <- conditions_sumstat[pos]
+            if (length(sumstats)==0) next
+            if (is.null(names(sumstat_data$LD_info))){
+                conditions_sumstat_ld <- conditions_sumstat
+            } else {
+                conditions_sumstat_ld <- names(sumstats)
+            }
             for (ii in 1:length(sumstats)){
                 sumstat <- sumstats[[ii]]
                 n <- sumstat$n
                 var_y = sumstat$var_y
-
-                # Perform quality control
+                
+                preprocess_results <- rss_basic_qc(sumstat$sumstats, LD_data, remove_indels = remove_indels)
+                sumstat$sumstats <- preprocess_results$sumstats
+                LD_mat <- preprocess_results$LD_mat   
+                # Perform quality control - remove
                 if (!is.null(qc_method)) {
                     qc_results <- summary_stats_qc(sumstat$sumstats, LD_data, n = n, var_y = var_y, method = qc_method)
                     sumstat$sumstats <- qc_results$sumstats
@@ -659,7 +785,7 @@ qc_regional_data <- function(region_data,
     sumstat_data = region_data$sumstat_data
     if (!is.null(sumstat_data)){
         # - 1. initial check PIP
-        sumstat_data <- data_initial_screen_sumstat(sumstat_data, skip_region = skip_region,
+        sumstat_data <- data_initial_screen_sumstat(sumstat_data, 
                                                     remove_indels = remove_indels, 
                                                     pip_cutoff_to_skip = pip_cutoff_to_skip_sumstat)
         
