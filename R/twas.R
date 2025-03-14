@@ -254,7 +254,6 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file)
         results[[molecular_id]][["LD"]] <- as.matrix(LD_list$combined_LD_matrix[var_indx, var_indx])
         rownames(results[[molecular_id]][["LD"]]) <- colnames(results[[molecular_id]][["LD"]]) <- paste0("chr", colnames(results[[molecular_id]][["LD"]]))
     }
-
   }
   # return results
   return(list(twas_data_qced = results, snp_info = snp_info))
