@@ -685,11 +685,11 @@ load_multitrait_R_sumstat <- function(susie_fit, sumstats_db, coverage = NULL, t
               ld_bim_file <- vroom(bim_file_path)
 
               # Perform allele quality control
-              flipped_data <- allele_qc(data[, 1:4], ld_bim_file$V2, data,
+              flipped_data <- allele_qc(data, ld_bim_file$V2,
                 col_to_flip = c(value_column),
                 match_min_prop = 0, remove_dups = FALSE,
                 remove_indels = FALSE, remove_strand_ambiguous = FALSE,
-                flip_strand = FALSE, remove_unmatched = TRUE, target_gwas = FALSE
+                flip_strand = FALSE, remove_unmatched = TRUE
               )$target_data_qced
               return(flipped_data)
             }
@@ -913,10 +913,10 @@ merge_mash_data <- function(res_data, one_data) {
 
 #' @export
 mash_pipeline <- function(mash_input, alpha, residual_correlation = NULL, unconstrained.update = "ted", set_seed = 999) {
-  if (! requireNamespace("mashr", quietly = TRUE)) {
+  if (!requireNamespace("mashr", quietly = TRUE)) {
     stop("To use this function, please install mashr: https://cran.r-project.org/web/packages/mashr/index.html")
   }
-  if (! requireNamespace("flashier", quietly = TRUE)) {
+  if (!requireNamespace("flashier", quietly = TRUE)) {
     stop("To use this function, please install flashier: https://github.com/willwerscheid/flashier")
   }
   set.seed(set_seed)

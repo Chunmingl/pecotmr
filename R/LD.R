@@ -1,31 +1,30 @@
 #' Function to Check if Regions are in increasing order and remove duplicated rows
 #' @importFrom dplyr distinct arrange group_by mutate ungroup
 #' @importFrom magrittr %>%
-#' @importFrom stats lag
-check_consecutive_regions <- function(df) {
+#' @noRd
+order_dedup_regions <- function(df) {
   # Ensure that 'chrom' values are integers, df can be genomic_data or regions_of_interest
   df$chrom <- ifelse(grepl("^chr", df$chrom),
     as.integer(sub("^chr", "", df$chrom)), # Remove 'chr' and convert to integer
     as.integer(df$chrom)
   ) # Convert to integer if not already
-  # Remove duplicated rows based on 'chrom' and 'start' columns
-  df <- distinct(df, chrom, start, .keep_all = TRUE)
 
-  # Arrange the genomic regions by 'chrom' and 'start' columns
-  df <- df %>%
+  # Remove duplicated rows based on 'chrom' and 'start' columns
+  df <- distinct(df, chrom, start, .keep_all = TRUE) %>%
     arrange(chrom, start)
 
-  # Group by chromosome and check if start positions are in ascending order
-  # use stats::lag here explicitly to avoid warning message
-  # due to a dplyr issue: https://github.com/tidyverse/dplyr/issues/2195
-  start_ordered_check <- df %>%
-    group_by(chrom) %>%
-    mutate(start_order = start >= lag(start, default = first(start))) %>%
-    ungroup()
+  # for (chr in unique(df$chrom)) {
+  #  chr_rows <- which(df$chrom == chr)
+  #  if (length(chr_rows) > 1) {
+  #    starts <- df$start[chr_rows]
+  #    for (i in 2:length(starts)) {
+  #      if (starts[i] < starts[i - 1]) {
+  #        stop("The input list of regions is not in increasing order within each chromosome.")
+  #      }
+  #    }
+  #  }
+  # }
 
-  if (any(!start_ordered_check$start_order, na.rm = TRUE)) {
-    stop("The input list of regions is not in increasing order within each chromosome.")
-  }
   return(df)
 }
 
@@ -33,18 +32,22 @@ check_consecutive_regions <- function(df) {
 #' @importFrom dplyr filter arrange slice
 #' @noRd
 find_intersection_rows <- function(genomic_data, region_chrom, region_start, region_end) {
-  # Adjusting region_start if it's smaller than the smallest start position in genomic_data
-  min_start <- min(genomic_data %>% filter(chrom == region_chrom) %>% pull(start))
+  # Filter for the specific chromosome
+  chrom_data <- genomic_data %>% filter(chrom == region_chrom)
+
+  min_start <- if (nrow(chrom_data) > 0) min(chrom_data$start) else NA
+  max_end <- if (nrow(chrom_data) > 0) max(chrom_data$end) else NA
+
+  # Adjust region bounds if they're outside available data range
   if (!is.na(min_start) && region_start < min_start) {
     region_start <- min_start
   }
 
-  # Adjusting region_end if it's larger than the largest end position in genomic_data
-  max_end <- max(genomic_data %>% filter(chrom == region_chrom) %>% pull(end))
   if (!is.na(max_end) && region_end > max_end) {
     region_end <- max_end
   }
 
+  # Try to find rows that cover the region start and end
   start_row <- genomic_data %>%
     filter(chrom == region_chrom, start <= region_start, end >= region_start) %>%
     slice(1)
@@ -111,8 +114,8 @@ get_regional_ld_meta <- function(ld_reference_meta_file, region, complete_covera
   names(region) <- c("chrom", "start", "end")
 
   # Order and deduplicate regions
-  genomic_data <- check_consecutive_regions(genomic_data)
-  region <- check_consecutive_regions(region)
+  genomic_data <- order_dedup_regions(genomic_data)
+  region <- order_dedup_regions(region)
 
   # Process file paths
   file_path <- genomic_data$path %>%
@@ -250,51 +253,50 @@ extract_LD_for_region <- function(LD_matrix, variants, region, extract_coordinat
 
 # Create a combined LD matrix from multiple matrices
 create_combined_LD_matrix <- function(LD_matrices, variants) {
-  # Extract unique variant names from the list of variants
+  # Updated mergeVariants helper that checks the structure of each element.
   mergeVariants <- function(LD_variants_list) {
-    # Initialize an empty vector to store the merged variants
     mergedVariants <- character(0)
-
-    # Loop over the list of LD matrices using sapply
-    sapply(LD_variants_list, function(LD_variants) {
-      # Extract the variants from the current LD matrix
-      currentVariants <- get_nested_element(LD_variants, "variants")
-      if (length(currentVariants) == 0) {
-        return(NULL)
-      }
-
-      # Merge variants with the previously merged variants vector
-      # Checking if the last variant is the same as the first of the current, if so, skip the first
-      if (length(mergedVariants) > 0 && tail(mergedVariants, 1) == currentVariants[1]) {
-        mergedVariants <<- c(mergedVariants, currentVariants[-1])
+    # Loop over the list of variant information
+    for (LD_variants in LD_variants_list) {
+      currentVariants <- if (is.list(LD_variants) && !is.null(LD_variants$variants)) {
+        LD_variants$variants
       } else {
-        mergedVariants <<- c(mergedVariants, currentVariants)
+        LD_variants
       }
-    })
 
-    # Return the merged vector of variants
+      if (length(currentVariants) == 0) next
+
+      # If the last variant in mergedVariants is the same as the first of currentVariants, skip the duplicate
+      if (length(mergedVariants) > 0 && tail(mergedVariants, 1) == currentVariants[1]) {
+        mergedVariants <- c(mergedVariants, currentVariants[-1])
+      } else {
+        mergedVariants <- c(mergedVariants, currentVariants)
+      }
+    }
     return(mergedVariants)
   }
+
   unique_variants <- mergeVariants(variants)
   # Initialize an empty combined LD matrix with the unique variants
   combined_LD_matrix <- matrix(0, nrow = length(unique_variants), ncol = length(unique_variants))
   rownames(combined_LD_matrix) <- unique_variants
   colnames(combined_LD_matrix) <- unique_variants
-  # Define a function to align the values from each LD matrix to the combined matrix
+
+  # Function to align the values from each LD matrix to the combined matrix
   align_matrix <- function(ld_matrix, combined_matrix, variant_names) {
-    # Find the indices of the variant names in the combined matrix
     indices <- match(variant_names, rownames(combined_matrix))
-    # Fill in the values for both rows and columns
     combined_matrix[indices, indices] <- ld_matrix
     return(combined_matrix)
   }
-  # Apply the fill_matrix function to each LD matrix and accumulate the results
+
+  # Use Map to pair each LD matrix with its rownames, then Reduce to fill the combined matrix.
   combined_LD_matrix <- Reduce(
     function(x, y) align_matrix(y[[1]], x, y[[2]]),
     Map(list, LD_matrices, lapply(LD_matrices, rownames)),
     combined_LD_matrix
   )
-  combined_LD_matrix
+
+  return(combined_LD_matrix)
 }
 
 #' Load and Process Linkage Disequilibrium (LD) Matrix
@@ -311,6 +313,9 @@ create_combined_LD_matrix <- function(LD_matrices, variants) {
 #' \item{combined_LD_variants}{A data frame merging selected variants within each LD block in bim file format with columns "chrom", "variants",
 #' "GD", "pos", "A1", and "A2".}
 #' \item{combined_LD_matrix}{The LD matrix for each region, with row and column names matching variant identifiers.}
+#' \item{block_indices}{A data frame tracking the indices of variants in the combined matrix by LD block,
+#' with columns "block_id", "start_idx", "end_idx", "chrom", "block_start", "block_end" to facilitate
+#' further partitioning if needed.}
 #' }
 #' @export
 load_LD_matrix <- function(LD_meta_file_path, region, extract_coordinates = NULL) {
@@ -324,6 +329,7 @@ load_LD_matrix <- function(LD_meta_file_path, region, extract_coordinates = NULL
   # Using a for loop here to allow for rm() in each loop to save memory
   extracted_LD_matrices_list <- list()
   extracted_LD_variants_list <- list()
+  block_chroms <- character(length(LD_file_paths))
 
   # Process each LD block individually
   for (j in seq_along(LD_file_paths)) {
@@ -336,25 +342,57 @@ load_LD_matrix <- function(LD_meta_file_path, region, extract_coordinates = NULL
     )
     extracted_LD_matrices_list[[j]] <- extracted_LD_list$extracted_LD_matrix
     extracted_LD_variants_list[[j]] <- extracted_LD_list$extracted_LD_variants
+    if (nrow(extracted_LD_variants_list[[j]]) > 0) {
+      block_chroms[j] <- as.character(extracted_LD_variants_list[[j]]$chrom[1])
+    } else {
+      # Use region chromosome as fallback for empty blocks
+      block_chroms[j] <- as.character(intersected_LD_files$region$chrom)
+    }
+
     # Remove large objects to free memory
     rm(LD_matrix_processed, extracted_LD_list)
   }
+
+  # Create combined LD matrix
   combined_LD_matrix <- create_combined_LD_matrix(
     LD_matrices = extracted_LD_matrices_list,
     variants = extracted_LD_variants_list
   )
+  combined_LD_variants <- rownames(combined_LD_matrix)
+
+  # Now create block_metadata with all the information we've accumulated
+  block_variants <- lapply(extracted_LD_variants_list, function(v) v$variants)
+  block_metadata <- data.frame(
+    block_id = seq_along(LD_file_paths),
+    chrom = block_chroms,
+    size = sapply(block_variants, length),
+    start_idx = sapply(block_variants, function(v) min(match(v, combined_LD_variants))),
+    end_idx = sapply(block_variants, function(v) max(match(v, combined_LD_variants))),
+    stringsAsFactors = FALSE
+  )
+
   # Remove large objects to free memory
   rm(extracted_LD_matrices_list)
 
+  # Create reference panel
   ref_panel <- do.call(rbind, lapply(strsplit(rownames(combined_LD_matrix), ":"), function(x) {
     data.frame(chrom = x[1], pos = as.integer(x[2]), A2 = x[3], A1 = x[4])
   }))
+
   merged_variant_list <- do.call(rbind, extracted_LD_variants_list)
   ref_panel$variant_id <- rownames(combined_LD_matrix)
-  if ("variance" %in% colnames(merged_variant_list)) ref_panel$variance <- merged_variant_list$variance[match(rownames(combined_LD_matrix), merged_variant_list$variants)]
 
-  # LD list for region
-  combined_LD_list <- list(combined_LD_variants = rownames(combined_LD_matrix), combined_LD_matrix = combined_LD_matrix, ref_panel = ref_panel)
+  if ("variance" %in% colnames(merged_variant_list)) {
+    ref_panel$variance <- merged_variant_list$variance[match(rownames(combined_LD_matrix), merged_variant_list$variants)]
+  }
+
+  # Return the combined LD list
+  combined_LD_list <- list(
+    combined_LD_variants = combined_LD_variants,
+    combined_LD_matrix = combined_LD_matrix,
+    ref_panel = ref_panel,
+    block_metadata = block_metadata
+  )
 
   return(combined_LD_list)
 }
@@ -404,4 +442,277 @@ filter_variants_by_ld_reference <- function(variant_ids, ld_reference_meta_file,
   message(length(variant_ids) - length(keep_indices), " out of ", length(variant_ids), " total variants dropped due to absence on the reference LD panel.")
 
   return(list(data = variants_filtered, idx = keep_indices))
+}
+
+#' Partition LD Matrix into Block-Specific Matrices
+#'
+#' This function takes the output from load_LD_matrix and partitions the combined LD matrix
+#' into a list of smaller matrices based on the block_indices, making it easier to work with
+#' large LD matrices that span multiple blocks.
+#'
+#' @param ld_data A list as returned by load_LD_matrix, containing combined_LD_matrix,
+#'                combined_LD_variants, ref_panel, and block_metadata.
+#' @param merge_small_blocks Logical, whether to merge blocks smaller than min_merged_block_size (default: TRUE).
+#' @param min_merged_block_size Integer, minimum number of variants for a block after merging (default: 500).
+#' @param max_merged_block_size Integer, maximum number of variants in a block after merging (default: 10000).
+#'
+#' @return returns a list containing:
+#' \describe{
+#' \item{ld_matrices}{A list of matrices, each representing LD for a specific block.}
+#' \item{variant_indices}{A data frame that maps variant IDs to their corresponding block.}
+#' \item{block_metadata}{Information about each block including size, chromosome, start and end positions.}
+#' }
+#' @noRd
+partition_LD_matrix <- function(ld_data, merge_small_blocks = TRUE,
+                                min_merged_block_size = 500, max_merged_block_size = 10000) {
+  # Extract components from ld_data
+  combined_matrix <- ld_data$combined_LD_matrix
+  block_metadata <- ld_data$block_metadata
+  variant_ids <- ld_data$combined_LD_variants
+
+  # Error if matrix is empty
+  if (is.null(combined_matrix) || nrow(combined_matrix) == 0 || ncol(combined_matrix) == 0) {
+    stop("Empty or NULL LD matrix provided.")
+  }
+
+  # Ensure the row and column names of the matrix match the variant_ids
+  if (is.null(rownames(combined_matrix)) || is.null(colnames(combined_matrix)) ||
+    !identical(rownames(combined_matrix), variant_ids) || !identical(colnames(combined_matrix), variant_ids)) {
+    rownames(combined_matrix) <- variant_ids
+    colnames(combined_matrix) <- variant_ids
+  }
+
+  # Validate the block structure of the matrix (skip if only one block)
+  if (nrow(block_metadata) > 1) {
+    validate_block_structure(combined_matrix, block_metadata, variant_ids)
+  }
+
+  # Optionally merge small blocks
+  if (merge_small_blocks && any(block_metadata$size < min_merged_block_size) && nrow(block_metadata) > 1) {
+    block_metadata <- merge_blocks(block_metadata, min_merged_block_size, max_merged_block_size)
+  }
+
+  # Partition the matrix based on block metadata
+  result <- extract_block_matrices(combined_matrix, block_metadata, variant_ids)
+
+  return(result)
+}
+
+# Helper function to validate block structure
+validate_block_structure <- function(matrix, block_metadata, variant_ids) {
+  validation_failed <- FALSE
+  validation_message <- character(0)
+
+  # Iterate over all pairs of distinct blocks
+  for (i in 1:(nrow(block_metadata) - 1)) {
+    for (j in (i + 1):nrow(block_metadata)) {
+      # Get indices for each block
+      block_i_start <- block_metadata$start_idx[i]
+      block_i_end <- block_metadata$end_idx[i]
+      block_j_start <- block_metadata$start_idx[j]
+      block_j_end <- block_metadata$end_idx[j]
+
+      # Check if indices are valid
+      if (block_i_start > length(variant_ids) || block_i_end > length(variant_ids) ||
+        block_j_start > length(variant_ids) || block_j_end > length(variant_ids)) {
+        validation_failed <- TRUE
+        validation_message <- c(
+          validation_message,
+          paste("Block indices are out of range for blocks", i, "and", j)
+        )
+        next
+      }
+
+      # Get variants for each block, EXCLUDING THE BOUNDARY VARIANTS
+      # For block i, exclude the last variant (potential overlap with next block)
+      # For block j, exclude the first variant (potential overlap with previous block)
+      block_i_vars <- variant_ids[block_i_start:(block_i_end - 1)]
+      block_j_vars <- variant_ids[(block_j_start + 1):block_j_end]
+
+      # Only check if there are variants in both blocks
+      if (length(block_i_vars) > 0 && length(block_j_vars) > 0) {
+        # Extract the cross-block submatrix for these variants
+        cross_block_unique <- matrix[block_i_vars, block_j_vars, drop = FALSE]
+
+        # Check if any values are non-zero
+        max_value <- max(abs(cross_block_unique))
+        if (max_value > 1e-10) {
+          validation_failed <- TRUE
+          validation_message <- c(
+            validation_message,
+            paste(
+              "Non-zero correlation detected between unique variants of blocks", i, "and", j,
+              "- Max value:", max_value
+            )
+          )
+        }
+      }
+    }
+  }
+
+  # If validation failed, stop execution with error message
+  if (validation_failed) {
+    stop(
+      "Matrix does not have the expected block structure:\n",
+      paste(validation_message, collapse = "\n")
+    )
+  }
+}
+# Helper function to merge small blocks
+# Check if two blocks can be merged based on chromosome and size constraints
+can_merge <- function(block1, block2, max_size) {
+  # Check if blocks are on the same chromosome
+  same_chrom <- block1$chrom == block2$chrom
+
+  # Check if combined size is within limits
+  combined_size <- block1$size + block2$size
+  size_ok <- combined_size <= max_size
+
+  return(same_chrom && size_ok)
+}
+
+# Merge two blocks in the metadata dataframe
+merge_two_blocks <- function(block_metadata, idx1, idx2) {
+  # Ensure idx1 < idx2 for consistent behavior
+  if (idx1 > idx2) {
+    temp <- idx1
+    idx1 <- idx2
+    idx2 <- temp
+  }
+
+  # Create a copy to avoid modifying the input directly
+  result <- block_metadata
+
+  # Update the end index and size of the first block
+  result$end_idx[idx1] <- block_metadata$end_idx[idx2]
+  result$size[idx1] <- block_metadata$size[idx1] + block_metadata$size[idx2]
+
+  # Remove the second block
+  result <- result[-idx2, ]
+
+  # Renumber block IDs
+  result$block_id <- seq_len(nrow(result))
+
+  return(result)
+}
+
+# Find small blocks and their best merge candidates
+find_merge_candidates <- function(block_metadata, min_size, max_size) {
+  candidates <- data.frame(
+    block_idx = integer(),
+    merge_with = integer(),
+    stringsAsFactors = FALSE
+  )
+
+  for (i in seq_len(nrow(block_metadata))) {
+    # Skip if block size is adequate
+    if (block_metadata$size[i] >= min_size) next
+
+    # Check previous block
+    prev_idx <- i - 1
+    can_merge_prev <- prev_idx >= 1 &&
+      can_merge(block_metadata[i, ], block_metadata[prev_idx, ], max_size)
+
+    # Check next block
+    next_idx <- i + 1
+    can_merge_next <- next_idx <= nrow(block_metadata) &&
+      can_merge(block_metadata[i, ], block_metadata[next_idx, ], max_size)
+
+    # Determine best merge option
+    if (can_merge_prev && can_merge_next) {
+      # Choose the smaller of the two to minimize impact
+      if (block_metadata$size[prev_idx] <= block_metadata$size[next_idx]) {
+        merge_with <- prev_idx
+      } else {
+        merge_with <- next_idx
+      }
+      candidates <- rbind(candidates, data.frame(block_idx = i, merge_with = merge_with))
+    } else if (can_merge_prev) {
+      candidates <- rbind(candidates, data.frame(block_idx = i, merge_with = prev_idx))
+    } else if (can_merge_next) {
+      candidates <- rbind(candidates, data.frame(block_idx = i, merge_with = next_idx))
+    }
+    # If no valid merge candidates, leave the block as is
+  }
+
+  return(candidates)
+}
+
+# Helper function to merge small blocks
+merge_blocks <- function(block_metadata, min_size, max_size) {
+  # If there's only one block or empty input, just return it
+  if (nrow(block_metadata) <= 1) {
+    return(block_metadata)
+  }
+
+  new_block_metadata <- block_metadata
+  made_changes <- TRUE
+
+  # Iterate until no more merges are possible
+  while (made_changes) {
+    # Find all current merge candidates
+    candidates <- find_merge_candidates(new_block_metadata, min_size, max_size)
+
+    # Stop if no candidates found
+    if (nrow(candidates) == 0) {
+      made_changes <- FALSE
+      break
+    }
+
+    # Process the first candidate (we only do one merge per iteration to avoid index issues)
+    new_block_metadata <- merge_two_blocks(
+      new_block_metadata,
+      candidates$block_idx[1],
+      candidates$merge_with[1]
+    )
+  }
+
+  return(new_block_metadata)
+}
+
+# Helper function to extract block matrices
+extract_block_matrices <- function(matrix, block_metadata, variant_ids) {
+  ld_matrices <- list()
+  variant_mapping <- data.frame(
+    variant_id = character(),
+    block_id = integer(),
+    stringsAsFactors = FALSE
+  )
+
+  for (i in seq_len(nrow(block_metadata))) {
+    start_idx <- block_metadata$start_idx[i]
+    end_idx <- block_metadata$end_idx[i]
+
+    # Skip empty blocks
+    if (end_idx < start_idx) next
+
+    # Ensure indices are within bounds
+    if (start_idx > length(variant_ids) || end_idx > length(variant_ids)) {
+      warning(paste("Block", i, "has indices outside the range of variant_ids. Skipping."))
+      next
+    }
+
+    # Extract variant IDs for this block
+    block_variants <- variant_ids[start_idx:end_idx]
+
+    # Extract submatrix for this block - use named indexing
+    block_matrix <- matrix[block_variants, block_variants, drop = FALSE]
+
+    # Store in list
+    ld_matrices[[i]] <- block_matrix
+
+    # Update variant mapping
+    block_mapping <- data.frame(
+      variant_id = block_variants,
+      block_id = i,
+      stringsAsFactors = FALSE
+    )
+    variant_mapping <- rbind(variant_mapping, block_mapping)
+  }
+
+  return(list(
+    ld_matrices = ld_matrices,
+    variant_indices = variant_mapping,
+    block_metadata = block_metadata
+  ))
 }

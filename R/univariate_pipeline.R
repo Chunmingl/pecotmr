@@ -52,7 +52,7 @@ univariate_analysis_pipeline <- function(
     # fine-mapping results summary
     signal_cutoff = 0.025,
     coverage = c(0.95, 0.7, 0.5),
-    finemapping_extra_opts = list(refine=TRUE),
+    finemapping_extra_opts = list(refine = TRUE),
     # TWAS weights and CV for TWAS weights
     twas_weights = TRUE,
     sample_partition = NULL,
@@ -110,8 +110,8 @@ univariate_analysis_pipeline <- function(
 
   # SuSiE analysis with optimization
   message("Fitting SuSiE model on input data with L optimization...")
-  base_susie_args <- list(X=X, y=Y, init_L = init_L, max_L = max_L, l_step = l_step, coverage = coverage[1])
-  susie_args <- modifyList(finemapping_extra_opts, base_susie_args)  # base args takes precedence
+  base_susie_args <- list(X = X, y = Y, init_L = init_L, max_L = max_L, l_step = l_step, coverage = coverage[1])
+  susie_args <- modifyList(finemapping_extra_opts, base_susie_args) # base args takes precedence
   res$susie_fitted <- do.call(susie_wrapper, susie_args)
 
   # Process SuSiE results
@@ -151,8 +151,11 @@ univariate_analysis_pipeline <- function(
 #' @param n_sample User-specified sample size. If unknown, set as 0 to retrieve from the sumstat file.
 #' @param n_case User-specified number of cases.
 #' @param n_control User-specified number of controls.
+#' @param region The region where tabix use to subset the input dataset.
 #' @param skip_region A character vector specifying regions to be skipped in the analysis (optional).
 #'                    Each region should be in the format "chrom:start-end" (e.g., "1:1000000-2000000").
+#' @param extract_region_name User-specified gene/phenotype name used to further subset the phenotype data.
+#' @param region_name_col Filter this specific column for the extract_region_name.
 #' @param L Initial number of causal configurations to consider in the analysis (default: 8).
 #' @param max_L Maximum number of causal configurations to consider when dynamically adjusting L (default: 20).
 #' @param l_step Step size for increasing L when the limit is reached during dynamic adjustment (default: 5).
@@ -171,7 +174,8 @@ univariate_analysis_pipeline <- function(
 #' @importFrom magrittr %>%
 #' @export
 rss_analysis_pipeline <- function(
-    sumstat_path, column_file_path, LD_data, n_sample = 0, n_case = 0, n_control = 0, target = "", region = "", target_column_index = "", skip_region = NULL,
+    sumstat_path, column_file_path, LD_data, n_sample = 0, n_case = 0, n_control = 0, region = NULL, skip_region = NULL,
+    extract_region_name = NULL, region_name_col = NULL,
     qc_method = c("rss_qc", "dentist", "slalom"),
     finemapping_method = c("susie_rss", "single_effect", "bayesian_conditional_regression"),
     finemapping_opts = list(
@@ -183,8 +187,9 @@ rss_analysis_pipeline <- function(
   res <- list()
   rss_input <- load_rss_data(
     sumstat_path = sumstat_path, column_file_path = column_file_path,
-    n_sample = n_sample, n_case = n_case, n_control = n_control, target = target, region = region,
-      target_column_index = target_column_index, comment_string = comment_string
+    n_sample = n_sample, n_case = n_case, n_control = n_control,
+    extract_region_name = extract_region_name, region = region,
+    region_name_col = region_name_col, comment_string = comment_string
   )
 
   sumstats <- rss_input$sumstats
@@ -219,7 +224,8 @@ rss_analysis_pipeline <- function(
 
   # Perform imputation
   if (impute) {
-    impute_results <- raiss(LD_data$ref_panel, sumstats, LD_data$combined_LD_matrix, rcond = impute_opts$rcond, R2_threshold = impute_opts$R2_threshold, minimum_ld = impute_opts$minimum_ld, lamb = impute_opts$lamb)
+    LD_matrix <- partition_LD_matrix(LD_data)
+    impute_results <- raiss(LD_data$ref_panel, sumstats, LD_matrix, rcond = impute_opts$rcond, R2_threshold = impute_opts$R2_threshold, minimum_ld = impute_opts$minimum_ld, lamb = impute_opts$lamb)
     sumstats <- impute_results$result_filter
     LD_mat <- impute_results$LD_mat
   }

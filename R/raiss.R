@@ -1,39 +1,49 @@
-#' Robust and accurate imputation from summary statistics
+#' Core RAISS implementation for a single LD matrix
 #'
-#' This function is a part of the statistical library for SNP imputation from:
-#' https://gitlab.pasteur.fr/statistical-genetics/raiss/-/blob/master/raiss/stat_models.py
-#' It is R implementation of the imputation model described in the paper by Bogdan Pasaniuc,
-#' Noah Zaitlen, et al., titled "Fast and accurate imputation of summary
-#' statistics enhances evidence of functional enrichment", published in
-#' Bioinformatics in 2014.
 #' @param ref_panel A data frame containing 'chrom', 'pos', 'variant_id', 'A1', and 'A2'.
 #' @param known_zscores A data frame containing 'chrom', 'pos', 'variant_id', 'A1', 'A2', and 'z' values.
 #' @param LD_matrix A square matrix of dimension equal to the number of rows in ref_panel.
-#' @param lamb Regularization term added to the diagonal of the LD_matrix in the RAImputation model.
-#' @param rcond Threshold for filtering eigenvalues in the pseudo-inverse computation in the RAImputation model.
+#' @param lamb Regularization term added to the diagonal of the LD_matrix.
+#' @param rcond Threshold for filtering eigenvalues in the pseudo-inverse computation.
 #' @param R2_threshold R square threshold below which SNPs are filtered from the output.
 #' @param minimum_ld Minimum LD score threshold for SNP filtering.
+#' @param verbose Logical indicating whether to print progress information.
 #'
-#' @return A data frame that is the result of merging the imputed SNP data with known z-scores.
+#' @return A list containing filtered and unfiltered results, and filtered LD matrix.
 #' @importFrom dplyr arrange
-#' @export
-#'
-#' @examples
-#' # Example usage (assuming appropriate data is available):
-#' # result <- raiss(ref_panel, known_zscores, LD_matrix, lamb = 0.01, rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5)
-raiss <- function(ref_panel, known_zscores, LD_matrix, lamb = 0.01, rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5, verbose = TRUE) {
+#' @noRd
+raiss_single_matrix <- function(ref_panel, known_zscores, LD_matrix, lamb = 0.01, rcond = 0.01,
+                                R2_threshold = 0.6, minimum_ld = 5, verbose = TRUE) {
   # Check that ref_panel and known_zscores are both increasing in terms of pos
   if (is.unsorted(ref_panel$pos) || is.unsorted(known_zscores$pos)) {
     stop("ref_panel and known_zscores must be in increasing order of pos.")
+  }
+
+  # Convert LD_matrix to matrix if it's a data frame
+  if (is.data.frame(LD_matrix)) {
+    LD_matrix <- as.matrix(LD_matrix)
   }
 
   # Define knowns and unknowns
   knowns_id <- intersect(known_zscores$variant_id, ref_panel$variant_id)
   knowns <- which(ref_panel$variant_id %in% knowns_id)
   unknowns <- which(!ref_panel$variant_id %in% knowns_id)
-  if (is.data.frame(LD_matrix)) {
-    LD_matrix <- as.matrix(LD_matrix)
+
+  # Handle edge cases
+  if (length(knowns) == 0) {
+    if (verbose) message("No known variants found, cannot perform imputation.")
+    return(NULL)
   }
+
+  if (length(unknowns) == 0) {
+    if (verbose) message("No unknown variants to impute, returning known variants.")
+    return(list(
+      result_nofilter = known_zscores,
+      result_filter = known_zscores,
+      LD_mat = LD_matrix
+    ))
+  }
+
   # Extract zt, sig_t, and sig_i_t
   zt <- known_zscores$z
   sig_t <- LD_matrix[knowns, knowns, drop = FALSE]
@@ -52,10 +62,10 @@ raiss <- function(ref_panel, known_zscores, LD_matrix, lamb = 0.01, rcond = 0.01
   result_nofilter <- merge_raiss_df(results$zscores_nofilter, known_zscores) %>% arrange(pos)
   result_filter <- merge_raiss_df(results$zscores, known_zscores) %>% arrange(pos)
 
-  ## Filter out variants not included in the imputation result
+  # Filter out variants not included in the imputation result
   filtered_out_variant <- setdiff(ref_panel$variant_id, result_filter$variant_id)
 
-  ## Update the LD matrix excluding filtered variants
+  # Update the LD matrix excluding filtered variants
   LD_extract_filtered <- if (length(filtered_out_variant) > 0) {
     filtered_out_id <- match(filtered_out_variant, ref_panel$variant_id)
     as.matrix(LD_matrix)[-filtered_out_id, -filtered_out_id]
@@ -63,8 +73,168 @@ raiss <- function(ref_panel, known_zscores, LD_matrix, lamb = 0.01, rcond = 0.01
     as.matrix(LD_matrix)
   }
 
-  results <- list(result_nofilter = result_nofilter, result_filter = result_filter, LD_mat = LD_extract_filtered)
-  return(results)
+  # Return results
+  return(list(
+    result_nofilter = result_nofilter,
+    result_filter = result_filter,
+    LD_mat = LD_extract_filtered
+  ))
+}
+
+#' Robust and accurate imputation from summary statistics
+#'
+#' This function is a part of the statistical library for SNP imputation from:
+#' https://gitlab.pasteur.fr/statistical-genetics/raiss/-/blob/master/raiss/stat_models.py
+#' It is R implementation of the imputation model described in the paper by Bogdan Pasaniuc,
+#' Noah Zaitlen, et al., titled "Fast and accurate imputation of summary
+#' statistics enhances evidence of functional enrichment", published in
+#' Bioinformatics in 2014.
+#'
+#' This function can process either a single LD matrix or a list of LD matrices for different blocks.
+#' For a list of matrices, it processes each block separately and combines the results.
+#'
+#' @param ref_panel A data frame containing 'chrom', 'pos', 'variant_id', 'A1', and 'A2'.
+#' @param known_zscores A data frame containing 'chrom', 'pos', 'variant_id', 'A1', 'A2', and 'z' values.
+#' @param LD_matrix Either a square matrix or a list of matrices for LD blocks.
+#' @param lamb Regularization term added to the diagonal of the LD_matrix.
+#' @param rcond Threshold for filtering eigenvalues in the pseudo-inverse computation.
+#' @param R2_threshold R square threshold below which SNPs are filtered from the output.
+#' @param minimum_ld Minimum LD score threshold for SNP filtering.
+#' @param verbose Logical indicating whether to print progress information.
+#'
+#' @return A list containing filtered and unfiltered results, and filtered LD matrix.
+#' @importFrom dplyr arrange bind_rows
+#' @export
+raiss <- function(ref_panel, known_zscores, LD_matrix, lamb = 0.01, rcond = 0.01,
+                  R2_threshold = 0.6, minimum_ld = 5, verbose = TRUE) {
+  # Determine if we can process as a single matrix
+  is_single_matrix_case <- is.matrix(LD_matrix) ||
+    (is.list(LD_matrix) && !is.null(LD_matrix$ld_matrices) &&
+      length(LD_matrix$ld_matrices) == 1)
+
+  if (is_single_matrix_case) {
+    if (verbose) message("Processing single LD matrix", if (!is.matrix(LD_matrix)) " from list", "...")
+
+    # Extract the matrix if it's in a list
+    if (!is.matrix(LD_matrix)) {
+      LD_matrix <- LD_matrix$ld_matrices[[1]]
+    }
+
+    return(raiss_single_matrix(
+      ref_panel, known_zscores, LD_matrix,
+      lamb, rcond, R2_threshold, minimum_ld, verbose
+    ))
+  }
+
+  # For list of matrices, process each block
+  if (verbose) message("Processing multiple LD blocks...")
+
+  combine_with_boundary_check <- function(combined_result, new_result) {
+    # If either is empty, simply return the non-empty one or empty data frame
+    if (is.null(combined_result)) {
+      return(new_result)
+    }
+    if (is.null(new_result)) {
+      return(combined_result)
+    }
+
+    # Check if the last variant of combined matches the first of new
+    last_var <- combined_result$variant_id[nrow(combined_result)]
+    first_var <- new_result$variant_id[1]
+
+    if (last_var == first_var) {
+      new_r2 <- new_result$raiss_R2[1]
+      old_r2 <- combined_result$raiss_R2[nrow(combined_result)]
+      if (is.na(new_r2) && is.na(old_r2)) {
+        # Both are NA - keep the existing one
+      } else if (is.na(old_r2)) {
+        # Old is NA but new is not - use new
+        combined_result[nrow(combined_result), ] <- new_result[1, ]
+      } else if (is.na(new_r2)) {
+        # New is NA but old is not - keep old
+      } else if (new_r2 > old_r2) {
+        # Both are non-NA and new is better - use new
+        combined_result[nrow(combined_result), ] <- new_result[1, ]
+      }
+
+      # Add remaining rows from new (excluding first)
+      if (nrow(new_result) > 1) {
+        combined_result <- bind_rows(combined_result, new_result[-1, ])
+      }
+    } else {
+      # No overlap - combine all rows
+      combined_result <- bind_rows(combined_result, new_result)
+    }
+
+    return(combined_result)
+  }
+
+  results_list <- list()
+  variant_indices <- LD_matrix$variant_indices
+  block_ids <- unique(variant_indices$block_id)
+
+  for (block_id in block_ids) {
+    if (verbose) message(paste("Processing block", block_id, "of", length(block_ids)))
+
+    block_variant_ids <- variant_indices$variant_id[variant_indices$block_id == block_id]
+
+    # Subset ref_panel and LD_matrix for this block
+    block_indices <- match(block_variant_ids, ref_panel$variant_id)
+    block_ref_panel <- ref_panel[block_indices, ]
+    block_LD_matrix <- LD_matrix$ld_matrices[[block_id]]
+    block_known_zscores <- known_zscores %>% filter(variant_id %in% block_variant_ids)
+    if (nrow(block_LD_matrix) != nrow(block_ref_panel)) {
+      stop(paste("Block", block_id, ": LD matrix dimension does not match number of variants in reference panel"))
+    }
+
+    # Process the block using the core function
+    block_result <- raiss_single_matrix(
+      block_ref_panel, block_known_zscores, block_LD_matrix,
+      lamb, rcond, R2_threshold, minimum_ld,
+      verbose = FALSE
+    )
+
+    # Skip if block returned NULL (no known variants)
+    if (!is.null(block_result)) {
+      results_list[[block_id]] <- block_result
+    }
+  }
+
+  if (length(results_list) == 0) {
+    if (verbose) message("No blocks could be processed. Check that known_zscores overlap with variants in the blocks.")
+    return(NULL)
+  }
+
+  # Combine results sequentially to handle boundary duplicates
+  combined_nofilter <- results_list[[1]]$result_nofilter
+  combined_filter <- results_list[[1]]$result_filter
+
+  if (length(results_list) > 1) {
+    for (i in 2:length(results_list)) {
+      combined_nofilter <- combine_with_boundary_check(
+        combined_nofilter,
+        results_list[[i]]$result_nofilter
+      )
+
+      combined_filter <- combine_with_boundary_check(
+        combined_filter,
+        results_list[[i]]$result_filter
+      )
+    }
+  }
+
+  ld_filtered_list <- lapply(results_list, function(x) x$LD_mat)
+  variant_list <- lapply(ld_filtered_list, function(ld) data.frame(variants = colnames(ld)))
+  combined_LD_matrix <- create_combined_LD_matrix(
+    LD_matrices = ld_filtered_list,
+    variants = variant_list
+  )
+
+  return(list(
+    result_nofilter = combined_nofilter,
+    result_filter = combined_filter,
+    LD_mat = combined_LD_matrix
+  ))
 }
 
 #' @param zt Vector of known z scores.
