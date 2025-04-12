@@ -103,7 +103,8 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file)
   # function to extract LD variance for the query region
   query_variance <- function(ld_variant_info_data, extract_coordinates) {
     ld_info_data <- do.call(rbind, ld_variant_info_data)
-    ld_info_data_filtered <- ld_info_data[ld_info_data$V4 %in% extract_coordinates$pos, , drop = FALSE]
+    ld_pos <- as.numeric(ld_info_data[, 4]) 
+    ld_info_data_filtered <- ld_info_data[ld_pos %in% extract_coordinates$pos, , drop = FALSE]
     variance_df <- ld_info_data_filtered[, c(1, 4, 5:7)] # Extract the variance column (7th column)
     colnames(variance_df) <- c("chrom", "pos", "A1", "A2", "variance")
     return(variance_df)
@@ -154,6 +155,8 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file)
   for (molecular_id in molecular_ids) {
     results[[molecular_id]][["chrom"]] <- chrom
     results[[molecular_id]][["data_type"]] <- if ("data_type" %in% names(twas_weights_data[[molecular_id]])) twas_weights_data[[molecular_id]]$data_type
+    results[[molecular_id]][["variant_names"]] <- list()
+
     # group contexts based on the variant position
     context_clusters <- group_contexts_by_region(twas_weights_data[[molecular_id]], molecular_id, chrom, tolerance = 5000)
 
@@ -226,7 +229,17 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file)
               paste0("chr", variant_qc$target_data_qced$variant_id[variant_qc$target_data_qced$variant_id %in% postqc_weight_variants])
             })
           }
-          rownames(weights_matrix_subset) <- if (!grepl("^chr", rownames(weights_matrix_subset)[1])) paste0("chr", rownames(weights_matrix_subset)) else rownames(weights_matrix_subset)
+          #rownames(weights_matrix_subset) <- if (!grepl("^chr", rownames(weights_matrix_subset)[1])) paste0("chr", rownames(weights_matrix_subset)) else rownames(weights_matrix_subset)
+          if (nrow(weights_matrix_subset) > 0) {
+              rownames(weights_matrix_subset) <- if (!grepl("^chr", rownames(weights_matrix_subset)[1])) {
+                  paste0("chr", rownames(weights_matrix_subset))
+              } else {
+                  rownames(weights_matrix_subset)
+              }
+          } else {
+              warning("weights_matrix_subset is empty. Skipping this context.")
+              next
+          }
           results[[molecular_id]][["variant_names"]][[context]][[study]] <- rownames(weights_matrix_subset)
 
           # Step 6: scale weights by variance
@@ -279,7 +292,8 @@ twas_pipeline <- function(twas_weights_data,
                           mr_pval_cutoff = 0.05,
                           mr_coverage_column = "cs_coverage_0.95",
                           quantile_twas = FALSE,
-                          output_twas_data = FALSE) {
+                          output_twas_data = FALSE,
+                          event_filters=NULL) {
   # internal function to format TWAS output
   format_twas_data <- function(post_qc_twas_data, twas_table) {
     weights_list <- do.call(c, lapply(names(post_qc_twas_data), function(molecular_id) {
@@ -403,6 +417,17 @@ twas_pipeline <- function(twas_weights_data,
 
   # Step 1: TWAS and MR analysis for all methods for imputable gene
   rsq_option <- match.arg(rsq_option)
+  # filter events 
+  if (!is.null(event_filters)){
+    for (weight_db in names(twas_weights_data)){
+      contexts <- names(twas_weights_data[[weight_db]]$weights)
+      filtered_events <- filter_molecular_events(contexts, event_filters, remove_all_group=TRUE)
+      for (db in names(twas_weights_data[[weight_db]])){
+         twas_weights_data[[weight_db]][[db]] <- twas_weights_data[[weight_db]][[db]][filtered_events]
+      }
+    }
+  }
+
   # harmonize twas weights and gwas sumstats against LD
   twas_data_qced_result <- harmonize_twas(twas_weights_data, ld_meta_file_path, gwas_meta_file)
   twas_results_db <- lapply(names(twas_weights_data), function(weight_db) {
@@ -461,6 +486,9 @@ twas_pipeline <- function(twas_weights_data,
           twas_data_qced[[weight_db]][["weights_qced"]][[context]][[study]][["weights"]], twas_data_qced[[weight_db]][["gwas_qced"]][[study]],
           twas_data_qced[[weight_db]][["LD"]], twas_variants
         )
+        if (is.null(twas_rs)) {
+          return(list(twas_rs_df = data.frame(), mr_rs_df = data.frame()))
+        }             
         twas_rs_df <- data.frame(
           gwas_study = study, method = sub("_[^_]+$", "", names(twas_rs)), twas_z = find_data(twas_rs, c(2, "z")),
           twas_pval = find_data(twas_rs, c(2, "pval")), context = context, molecular_id = weight_db
@@ -520,17 +548,32 @@ twas_pipeline <- function(twas_weights_data,
     gene_table <- do.call(rbind, lapply(contexts, function(context) {
       methods <- sub("_[^_]+$", "", names(twas_weights_data[[molecular_id]]$twas_cv_performance[[context]]))
       if (quantile_twas) {
-        # Quantile TWAS data extraction
-        quantile_starts <- sapply(twas_weights_data[[molecular_id]]$twas_cv_performance[[context]], function(x) x[, "quantile_start"])
-        quantile_ends <- sapply(twas_weights_data[[molecular_id]]$twas_cv_performance[[context]], function(x) x[, "quantile_end"])
-        pseudo_R2_avgs <- sapply(twas_weights_data[[molecular_id]]$twas_cv_performance[[context]], function(x) x[, "pseudo_R2_avg"])
-
-        context_table <- data.frame(
-          context = context, method = methods,
-          quantile_start = quantile_starts, quantile_end = quantile_ends,
-          pseudo_R2_avg = pseudo_R2_avgs,
-          type = twas_weights_data[[molecular_id]][["data_type"]][[context]]
-        )
+        cv_performance <- twas_weights_data[[molecular_id]]$twas_cv_performance[[context]]
+        if (length(methods) == 0) {
+          context_table <- data.frame()
+        } else {
+          method_results <- list()
+          
+          for (method in methods) {
+            if (!is.null(cv_performance[[paste0(method, "_performance")]])) {
+              performance_data <- cv_performance[[paste0(method, "_performance")]]
+              method_results[[method]] <- data.frame(
+                context = context,
+                method = method,
+                quantile_start = performance_data[, "quantile_start"],
+                quantile_end = performance_data[, "quantile_end"],
+                pseudo_R2_avg = performance_data[, "pseudo_R2_avg"],
+                type = twas_weights_data[[molecular_id]][["data_type"]][[context]]
+              )
+            }
+          }
+          
+          if (length(method_results) > 0) {
+            context_table <- do.call(rbind, method_results)
+          } else {
+            context_table <- data.frame()
+          }
+        }
       } else {
         # Original TWAS data extraction
         is_imputable <- twas_data[[molecular_id]][["model_selection"]][[context]]$is_imputable
@@ -563,6 +606,9 @@ twas_pipeline <- function(twas_weights_data,
   } else {
     c("chr", "molecular_id", "context", "gwas_study", "method", "is_imputable", "is_selected_method", "rsq_cv", "pval_cv", "twas_z", "twas_pval", "type", "block")
   }
+  if (nrow(twas_results_table) == 0) {
+    return(list(twas_result = NULL, twas_data = NULL, mr_result = NULL))
+  }    
   twas_table <- merge(twas_table, twas_results_table, by = c("molecular_id", "context", "method"))
   if (!quantile_twas) {
     twas_table <- twas_table[twas_table$is_imputable, , drop = FALSE]
@@ -694,13 +740,15 @@ twas_analysis <- function(weights_matrix, gwas_sumstats_db, LD_matrix, extract_v
   gwas_sumstats_subset <- gwas_sumstats_db[match(extract_variants_objs, gwas_sumstats_db$variant_id), ]
   # Validate that the GWAS subset is not empty
   if (nrow(gwas_sumstats_subset) == 0 | all(is.na(gwas_sumstats_subset))) {
-    stop("No GWAS summary statistics found for the specified variants.")
-  }
+    warning("No GWAS summary statistics found for the specified variants.")
+    return(NULL)
+  }      
   # Check if extract_variants_objs are in the rownames of LD_matrix
   valid_indices <- extract_variants_objs %in% rownames(LD_matrix)
   if (!any(valid_indices)) {
-    stop("None of the specified variants are present in the LD matrix.")
-  }
+    warning("None of the specified variants are present in the LD matrix. Skipping this context.")
+    return(NULL)
+  }    
   # Extract only the valid indices from extract_variants_objs
   valid_variants_objs <- extract_variants_objs[valid_indices]
   # Extract LD_matrix subset using valid indices
