@@ -41,7 +41,7 @@ read_fam <- function(bed) {
 # open pgen/pvar PLINK 2 data format
 open_pgen <- function(pgenf) {
   # Make sure pgenlibr is installed
-  if (! requireNamespace("pgenlibr", quietly = TRUE)) {
+  if (!requireNamespace("pgenlibr", quietly = TRUE)) {
     stop("To use this function, please install pgenlibr: https://cran.r-project.org/web/packages/pgenlibr/index.html")
   }
   return(pgenlibr::NewPgen(pgenf))
@@ -50,7 +50,7 @@ open_pgen <- function(pgenf) {
 # open bed/bim/fam: A PLINK 1 .bed is a valid .pgen
 open_bed <- function(bed) {
   # Make sure pgenlibr is installed
-  if (! requireNamespace("pgenlibr", quietly = TRUE)) {
+  if (!requireNamespace("pgenlibr", quietly = TRUE)) {
     stop("To use this function, please install pgenlibr: https://cran.r-project.org/web/packages/pgenlibr/index.html")
   }
   raw_s_ct <- nrow(read_fam(bed))
@@ -59,7 +59,7 @@ open_bed <- function(bed) {
 
 read_pgen <- function(pgen, variantidx = NULL, meanimpute = F) {
   # Make sure pgenlibr is installed
-  if (! requireNamespace("pgenlibr", quietly = TRUE)) {
+  if (!requireNamespace("pgenlibr", quietly = TRUE)) {
     stop("To use this function, please install pgenlibr: https://cran.r-project.org/web/packages/pgenlibr/index.html")
   }
   if (is.null(variantidx)) {
@@ -131,7 +131,7 @@ NoSNPsError <- function(message) {
 #' @export
 load_genotype_region <- function(genotype, region = NULL, keep_indel = TRUE, keep_variants_path = NULL) {
   # Make sure snpStats is installed
-  if (! requireNamespace("snpStats", quietly = TRUE)) {
+  if (!requireNamespace("snpStats", quietly = TRUE)) {
     stop("To use this function, please install snpStats: https://bioconductor.org/packages/release/bioc/html/snpStats.html")
   }
   if (!is.null(region)) {
@@ -489,6 +489,11 @@ load_regional_association_data <- function(genotype, # PLINK file
   ))
 }
 
+#' Load Regional Univariate Association Data
+#'
+#' This function loads regional association data for univariate analysis.
+#' It includes residual matrices, original genotype data, and additional metadata.
+#'
 #' @importFrom matrixStats colVars
 #' @return A list
 #' @export
@@ -508,6 +513,11 @@ load_regional_univariate_data <- function(...) {
   ))
 }
 
+#' Load Regional Data for Regression Modeling
+#'
+#' This function loads regional association data formatted for regression modeling.
+#' It includes phenotype, genotype, and covariate matrices along with metadata.
+#'
 #' @return A list
 #' @export
 load_regional_regression_data <- function(...) {
@@ -543,6 +553,11 @@ pheno_list_to_mat <- function(data_list) {
   return(data_list)
 }
 
+#' Load and Preprocess Regional Multivariate Data
+#'
+#' This function loads regional association data and processes it into a multivariate format.
+#' It optionally filters out samples based on missingness thresholds in the response matrix.
+#'
 #' @importFrom matrixStats colVars
 #' @return A list
 #' @export
@@ -578,6 +593,10 @@ load_regional_multivariate_data <- function(matrix_y_min_complete = NULL, # when
   ))
 }
 
+#' Load Regional Functional Association Data
+#'
+#' This function loads precomputed regional functional association data.
+#'
 #' @return A list
 #' @export
 load_regional_functional_data <- function(...) {
@@ -774,40 +793,48 @@ load_twas_weights <- function(weight_db_files, conditions = NULL,
 #' @param n_sample User-specified sample size. If unknown, set as 0 to retrieve from the sumstat file.
 #' @param n_case User-specified number of cases.
 #' @param n_control User-specified number of controls.
-#'
 #' @param region The region where tabix use to subset the input dataset.
-#' @param target User-specified gene/phenotype name used to further subset the phenotype data.
-#' @param target_column_index Filter this specific column for the target.
-#' @param comment_string comment sign in the column_mapping file, default is #
+#' @param extract_region_name User-specified gene/phenotype name used to further subset the phenotype data.
+#' @param region_name_col Filter this specific column for the extract_region_name.
+#' @param comment_string Comment sign in the column_mapping file, default is #
 #' @return A list of rss_input, including the column-name-formatted summary statistics,
 #' sample size (n), and var_y.
 #'
 #' @importFrom dplyr mutate group_by summarise
 #' @importFrom magrittr %>%
 #' @export
-load_rss_data <- function(sumstat_path, column_file_path, subset = TRUE, n_sample = 0, n_case = 0, n_control = 0, target = "",
-                          region = "", target_column_index = "", comment_string = "#") {
+load_rss_data <- function(sumstat_path, column_file_path, n_sample = 0, n_case = 0, n_control = 0, region = NULL,
+                          extract_region_name = NULL, region_name_col = NULL, comment_string = "#") {
   # Read and preprocess column mapping
   if (is.null(comment_string)) {
-    column_data <- read.table(column_file_path, 
-                              header = FALSE, sep = ":", 
-                              comment.char = "",  # This tells R not to treat any character as comment
-                              stringsAsFactors = FALSE) %>%
+    column_data <- read.table(column_file_path,
+      header = FALSE, sep = ":",
+      comment.char = "", # This tells R not to treat any character as comment
+      stringsAsFactors = FALSE
+    ) %>%
       rename(standard = V1, original = V2)
   } else {
-    column_data <- read.table(column_file_path, 
-                              header = FALSE, sep = ":", 
-                              comment.char = comment_string,
-                              stringsAsFactors = FALSE) %>%
+    column_data <- read.table(column_file_path,
+      header = FALSE, sep = ":",
+      comment.char = comment_string,
+      stringsAsFactors = FALSE
+    ) %>%
       rename(standard = V1, original = V2)
   }
-
   # Initialize sumstats variable
   sumstats <- NULL
   var_y <- NULL
-
-  sumstats <- load_tsv_region(sumstat_path = sumstat_path, region = region, target = target, target_column_index = target_column_index)
-
+  sumstats <- load_tsv_region(file_path = sumstat_path, region = region, extract_region_name = extract_region_name, region_name_col = region_name_col)
+  
+  # To keep a log message
+  n_variants <- nrow(sumstats)
+  if (n_variants == 0){
+      message(paste0("No variants in region ", region, "."))
+      return(list(sumstats = sumstats, n = NULL, var_y = NULL))
+  } else {
+      message(paste0("Region ", region, " include ", n_variants, " in input sumstats."))
+  }
+  
   # Standardize column names based on mapping
   for (name in colnames(sumstats)) {
     if (name %in% column_data$original) {
@@ -815,7 +842,6 @@ load_rss_data <- function(sumstat_path, column_file_path, subset = TRUE, n_sampl
       colnames(sumstats)[colnames(sumstats) == name] <- column_data$standard[index]
     }
   }
-
   if (!"z" %in% colnames(sumstats) && all(c("beta", "se") %in%
     colnames(sumstats))) {
     sumstats$z <- sumstats$beta / sumstats$se
@@ -854,70 +880,163 @@ load_rss_data <- function(sumstat_path, column_file_path, subset = TRUE, n_sampl
   return(list(sumstats = sumstats, n = n, var_y = var_y))
 }
 
-#' Load customized tsv data
+#' Load and filter tabular data with optional region subsetting
 #'
-#' This function load the input data. If the input sumstat data is .gz and tabixed, then can use the region parameter to subset the data
-#' and filter by target column
-#' Otherwise, it will only filter by target column since tabix command won't function (this apply to .tsv, .txt files)
+#' This function loads summary statistics data from tabular files (TSV, TXT).
+#' For compressed (.gz) and tabix-indexed files, it can subset data by genomic region.
+#' Additionally, it can filter results by a specified target value in a designated column.
 #'
+#' @param file_path Path to the summary statistics file.
+#' @param region Genomic region for subsetting tabix-indexed files. Format: chr:start-end (e.g., "9:10000-50000").
+#' @param extract_region_name Value to filter for in the specified filter column.
+#' @param region_name_col Index of the column to apply the extract_region_name against.
 #'
-#' @param sumstat_path File path to the summary statistics.
-#' @param region The region where tabix use to subset the input dataset. Format: chr:start-end (eg: 9:10000-50000)
-#' @param target User-specified gene/phenotype name used to further subset the phenotype data.
-#' @param target_column_index Filter this specific column for the target.
-#'
-#' @return A dataframe of the subsetted summary statistics,
+#' @return A dataframe containing the filtered summary statistics.
 #'
 #' @importFrom data.table fread
 #' @importFrom vroom vroom
 #' @export
-
-load_tsv_region <- function(sumstat_path, region = "", target = "", target_column_index = "") {
+load_tsv_region <- function(file_path, region = NULL, extract_region_name = NULL, region_name_col = NULL) {
   sumstats <- NULL
   cmd <- NULL
-  if(!is.null(region)){
-      if (grepl("^chr", region)) {
-          region <- sub("^chr", "", region)
-        }
+
+  if (!is.null(region)) {
+    if (grepl("^chr", region)) {
+      region <- sub("^chr", "", region)
+    }
   }
-  if (grepl(".gz$", sumstat_path)) {
+
+  if (grepl("\\.gz$", file_path)) {
     if (is.null(sumstats) || nrow(sumstats) == 0) {
-      if (target != "" && region != "" && target_column_index != "") {
-        # region specified, target specified
-        cmd <- paste0("zcat ", sumstat_path, " | head -1 && tabix ", sumstat_path, " ", region, " | awk '$", target_column_index, " ~ /", target, "/'")
-      } else if (target != "" && region == "" && target_column_index != "") {
-        # region not specified, target specified
-        cmd <- paste0("zcat ", sumstat_path, " | awk '$", target_column_index, " ~ /", target, "/'")
-      } else if (region != "" && (target_column_index == "" || target == "")) {
-        # region specified, target not specified
-        cmd <- paste0("zcat ", sumstat_path, " | head -1 && tabix ", sumstat_path, " ", region)
+      # Determine the appropriate command based on provided parameters
+      if (!is.null(extract_region_name) && !is.null(region) && !is.null(region_name_col)) {
+        # Both region and filter specified
+        cmd <- paste0(
+          "zcat ", file_path, " | head -1 && tabix ", file_path, " ", region,
+          " | awk '$", region_name_col, " ~ /", extract_region_name, "/'"
+        )
+      } else if (!is.null(extract_region_name) && is.null(region) && !is.null(region_name_col)) {
+        # Only filter specified, no region
+        cmd <- paste0("zcat ", file_path, " | awk '$", region_name_col, " ~ /", extract_region_name, "/'")
+      } else if (!is.null(region) && (is.null(region_name_col) || is.null(extract_region_name))) {
+        # Only region specified, no filter
+        cmd <- paste0("zcat ", file_path, " | head -1 && tabix ", file_path, " ", region)
       } else {
-        # both not specified. Instead of reading a command, read the file path instead
-        cmd <- sumstat_path
+        # Neither region nor filter specified
+        cmd <- file_path
       }
+
       sumstats <- tryCatch(
         {
           fread(cmd)
         },
         error = function(e) {
-          # the gz file cannot be processed by tabix / target column missing
-          stop("Data read error. Please make sure this gz file is tabixed and the target column exists.")
+          stop("Data read error. Please make sure this gz file is tabix-indexed and the specified filter column exists.")
         }
       )
     }
   } else {
-    # Non-gz files, cannot be tabixed. Load the whole dataset and only apply target filter
-    warning("Not a tabixed gz file, loading the whole data.")
-    if (target != "" && target_column_index != "") {
-      # target specified
-      sumstats <- vroom(sumstat_path)
-      keep_index <- which(str_detect(sumstats[[target_column_index]], target))
+    warning("Not a tabix-indexed gz file, loading the entire dataset.")
+    sumstats <- vroom(file_path)
+    # Apply filter if specified
+    if (!is.null(extract_region_name) && !is.null(region_name_col)) {
+      keep_index <- which(str_detect(sumstats[[region_name_col]], extract_region_name))
       sumstats <- sumstats[keep_index, ]
-    } else {
-      # target not specified, the whole dataset
-      sumstats <- vroom(sumstat_path)
     }
   }
 
   return(sumstats)
+}
+
+#' Split loaded twas_weights_results into batches based on maximum memory usage
+#'
+#' @param twas_weights_results List of loaded gene data by load_twas_weights()
+#' @param meta_data_df Dataframe containing gene metadata with region_id and TSS columns
+#' @param max_memory_per_batch Maximum memory per batch in MB (default: 750)
+#' @return List of batches, where each batch contains a subset of twas_weights_results
+#' @export
+batch_load_twas_weights <- function(twas_weights_results, meta_data_df, max_memory_per_batch = 750) {
+  gene_names <- names(twas_weights_results)
+  if (length(gene_names) == 0) {
+    message("No genes in twas_weights_results.")
+    return(list())
+  }
+
+  gene_memory_df <- data.frame(
+    gene_name = gene_names, memory_mb = sapply(gene_names, function(gene) {
+      as.numeric(object.size(twas_weights_results[[gene]])) / (1024^2) # Get object size in bytes and convert to MB
+    })
+  )
+
+  # Merge with meta_data_df to get TSS information
+  gene_memory_df <- merge(gene_memory_df, meta_data_df[, c("region_id", "TSS")],
+    by.x = "gene_name",
+    by.y = "region_id", all.x = TRUE
+  )
+  gene_memory_df <- gene_memory_df[order(gene_memory_df$TSS), ]
+
+  # Check if we need to split into batches
+  total_memory_mb <- sum(gene_memory_df$memory_mb)
+  message("Total memory usage: ", round(total_memory_mb, 2), " MB")
+  if (total_memory_mb <= max_memory_per_batch) {
+    message("All genes fit within the memory limit. No need to split into batches.")
+    return(list(all_genes = twas_weights_results))
+  }
+
+  # Create batches by adding genes until we reach the memory limit
+  batches <- list()
+  current_batch_genes <- character(0)
+  current_batch_memory <- 0
+  batch_index <- 1
+
+  for (i in 1:nrow(gene_memory_df)) {
+    gene <- gene_memory_df$gene_name[i]
+    gene_memory <- gene_memory_df$memory_mb[i]
+    # If a single gene exceeds the memory limit, include it in its own batch
+    if (gene_memory > max_memory_per_batch) {
+      batches[[paste0("batch_", batch_index)]] <- twas_weights_results[gene]
+      batch_index <- batch_index + 1
+      next
+    }
+    # If adding this gene would exceed the memory limit, start a new batch
+    if (current_batch_memory + gene_memory > max_memory_per_batch && length(current_batch_genes) > 0) {
+      batches[[paste0("batch_", batch_index)]] <- twas_weights_results[current_batch_genes]
+      current_batch_genes <- character(0)
+      current_batch_memory <- 0
+      batch_index <- batch_index + 1
+    }
+    current_batch_genes <- c(current_batch_genes, gene)
+    current_batch_memory <- current_batch_memory + gene_memory
+  }
+  # Add the last batch if not empty
+  if (length(current_batch_genes) > 0) {
+    batches[[batch_index]] <- twas_weights_results[current_batch_genes]
+  }
+  message("Split into ", length(batches), " batches")
+  names(batches) <- NULL
+  return(batches)
+}
+
+#' Function to load LD reference data variants
+#' @export
+#' @noRd
+load_ld_snp_info <- function(ld_meta_file_path, region_of_interest) {
+  bim_file_path <- get_regional_ld_meta(ld_meta_file_path, region_of_interest)$intersections$bim_file_paths
+  bim_data <- lapply(bim_file_path, function(bim_file) as.data.frame(vroom(bim_file, col_names = FALSE)))
+  snp_info <- setNames(lapply(bim_data, function(info_table) {
+    # for TWAS and MR, the variance and allele_freq are not necessary
+    if (ncol(info_table) >= 8) {
+      info_table <- info_table[, c(1, 2, 4:8)]
+      colnames(info_table) <- c("chrom", "id", "pos", "alt", "ref", "variance", "allele_freq")
+    } else if (ncol(info_table) == 6) {
+      info_table <- info_table[, c(1, 2, 4:6)]
+      colnames(info_table) <- c("chrom", "id", "pos", "alt", "ref")
+    } else {
+      warning("Unexpected number of columns; skipping this element.")
+      return(NULL)
+    }
+    info_table$id <- gsub("chr", "", gsub("_", ":", info_table$id))
+    return(info_table)
+  }), sapply(names(bim_data), function(x) gsub("chr", "", paste(strsplit(basename(x), "[_:/.]")[[1]][1:3], collapse = "_"))))
+  return(snp_info)
 }

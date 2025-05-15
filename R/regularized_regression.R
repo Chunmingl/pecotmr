@@ -420,7 +420,7 @@ init_prior_sd <- function(X, y, n = 30) {
 #' @export
 glmnet_weights <- function(X, y, alpha) {
   # Check if glmnet is installed
-  if (! requireNamespace("glmnet", quietly = TRUE)) {
+  if (!requireNamespace("glmnet", quietly = TRUE)) {
     stop("To use this function, please install glmnet: https://cran.r-project.org/web/packages/glmnet/index.html")
   }
   eff.wgt <- matrix(0, ncol = 1, nrow = ncol(X))
@@ -437,20 +437,26 @@ enet_weights <- function(X, y) glmnet_weights(X, y, 0.5)
 #' @export
 lasso_weights <- function(X, y) glmnet_weights(X, y, 1)
 
+#' Compute Weights Using mr.ash Shrinkage
+#'
+#' This function fits the `mr.ash` model (adaptive shrinkage regression) to estimate weights
+#' for a given set of predictors and response. It uses optional prior standard deviation initialization
+#' and can accept custom initial beta values.
+#'
 #' @examples
 #' wgt.mr.ash <- mrash_weights(eqtl$X, eqtl$y_res, beta.init = lasso_weights(X, y))
 #' @importFrom stats predict
 #' @export
 mrash_weights <- function(X, y, init_prior_sd = TRUE, ...) {
   # Make sure mr.ash is installed
-  if (! requireNamespace("mr.ash.alpha", quietly = TRUE)) {
+  if (!requireNamespace("mr.ash.alpha", quietly = TRUE)) {
     stop("To use this function, please install mr.ash: https://github.com/stephenslab/mr.ash.alpha")
   }
   args_list <- list(...)
   if (!"beta.init" %in% names(args_list)) {
     args_list$beta.init <- lasso_weights(X, y)
   }
-  fit.mr.ash <- do.call("mr.ash.alpha::mr.ash", c(list(X = X, y = y, sa2 = if (init_prior_sd) init_prior_sd(X, y)^2 else NULL), args_list))
+  fit.mr.ash <- do.call(getFromNamespace("mr.ash", "mr.ash.alpha"), c(list(X = X, y = y, sa2 = if (init_prior_sd) init_prior_sd(X, y)^2 else NULL), args_list))
   predict(fit.mr.ash, type = "coefficients")[-1]
 }
 #' Extract Coefficients From Bayesian Linear Regression
@@ -480,7 +486,7 @@ mrash_weights <- function(X, y, init_prior_sd = TRUE, ...) {
 #' @export
 bayes_alphabet_weights <- function(X, y, method, Z = NULL, nit = 5000, nburn = 1000, nthin = 5, ...) {
   # Make sure qgg is installed
-  if (! requireNamespace("qgg", quietly = TRUE)) {
+  if (!requireNamespace("qgg", quietly = TRUE)) {
     stop("To use this function, please install qgg: https://cran.r-project.org/web/packages/qgg/index.html")
   }
   # check for identical row lengths of response and genotype
@@ -618,9 +624,8 @@ gbayes_rss <- function(sumstats = NULL, LD = NULL, variant_ids = NULL, nit = 100
                        lambda = NULL, h2 = NULL, pi = 0.001, updateB = TRUE, updateG = TRUE, updateE = TRUE,
                        updatePi = TRUE, adjustE = TRUE, nug = 4, nub = 4, nue = 4, mask = NULL, ve_prior = NULL,
                        vg_prior = NULL, algorithm = "mcmc", tol = 0.001, nit_local = NULL, nit_global = NULL) {
-
   # Make sure qgg is installed
-  if (! requireNamespace("qgg", quietly = TRUE)) {
+  if (!requireNamespace("qgg", quietly = TRUE)) {
     stop("To use this function, please install qgg: https://cran.r-project.org/web/packages/qgg/index.html")
   }
   # Check methods
@@ -823,4 +828,44 @@ bayes_c_rss_weights <- function(sumstats, LD, ...) {
 #' @export
 bayes_r_rss_weights <- function(sumstats, LD, ...) {
   return(bayes_alphabet_rss_weights(sumstats, LD, method = "bayesR", ...))
+}
+
+#' @export
+susie_ash_weights <- function(susie_ash_fit, X = NULL, y = NULL, ...) {
+  # If the fit object is missing or NULL, try to recover it from the parent frame.
+  if (missing(susie_ash_fit) || is.null(susie_ash_fit)) {
+    susie_ash_fit <- get0("susie_ash_fit", envir = parent.frame())
+    if (is.null(susie_ash_fit)) {
+      stop("A susie_ash_fit object is required.")
+    }
+  }
+  if (!is.null(X)) {
+    if (length(susie_ash_fit$marginal_PIP) != ncol(X)) {
+      stop(paste0("Dimension mismatch on number of variants in susie_ash_fit ",
+                  length(susie_ash_fit$marginal_PIP), " and TWAS weights ", ncol(X), ". "))
+    }
+  }
+  # Calculate coefficients as per the provided formula.
+  weights <- rowSums(susie_ash_fit$mu * susie_ash_fit$PIP) + susie_ash_fit$theta
+  return(weights)
+}
+
+#' @export
+susie_inf_weights <- function(susie_inf_fit, X = NULL, y = NULL, ...) {
+  # If the fit object is missing or NULL, try to recover it from the parent frame.
+  if (missing(susie_inf_fit) || is.null(susie_inf_fit)) {
+    susie_inf_fit <- get0("susie_inf_fit", envir = parent.frame())
+    if (is.null(susie_inf_fit)) {
+      stop("A susie_inf_fit object is required.")
+    }
+  }
+  if (!is.null(X)) {
+    if (length(susie_inf_fit$marginal_PIP) != ncol(X)) {
+      stop(paste0("Dimension mismatch on number of variants in susie_inf_fit ",
+                  length(susie_inf_fit$marginal_PIP), " and TWAS weights ", ncol(X), ". "))
+    }
+  }
+  # Calculate coefficients as per the provided formula.
+  weights <- rowSums(susie_inf_fit$mu * susie_inf_fit$PIP) + susie_inf_fit$alpha
+  return(weights)
 }
