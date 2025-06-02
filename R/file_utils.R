@@ -608,10 +608,17 @@ load_regional_functional_data <- function(...) {
 
 # Function to remove gene name at the end of context name
 #' @export
-clean_context_names <- function(context, gene) {
+clean_context_names <- function(context, gene, region_names=NULL) {
   # Remove gene name if it matches the last part of the context
   gene <- gene[order(-nchar(unique(gene)))]
   for (gene_id in gene) {
+    for (cond in context){
+      if (grepl(paste0("_pQTL_", gene_id), cond)){
+        region_name <- unique(region_names[grepl(paste0("chr[0-9]+_", gene_id, "_.*"), region_names)])
+        new_cond <- sub(paste0("_pQTL_", gene_id), paste0("_pQTL_", region_name), cond)
+        context[context==cond] <- new_cond
+      }
+    }
     context <- gsub(paste0("_", gene_id), "", context)
   }
   return(context)
@@ -649,7 +656,7 @@ load_twas_weights <- function(weight_db_files, conditions = NULL,
       db <- readRDS(rds_file)
       gene <- names(db)
       if (any(unique(names(find_data(db, c(3, "twas_weights")))) %in% c("mrmash_weights", "mvsusie_weights"))) {
-        names(db[[1]]) <- clean_context_names(names(db[[1]]), gene = gene)
+        names(db[[1]]) <- clean_context_names(names(db[[1]]), gene = gene, region_names=db[[1]][[1]]$region_info$region_name)
         db <- list(mnm_rs = db[[1]])
       } else {
         # Check if region from all RDS files are the same
