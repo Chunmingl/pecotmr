@@ -375,7 +375,7 @@ susie_weights <- function(X = NULL, y = NULL, susie_fit = NULL, ...) {
 susie_ash_weights <- function(X = NULL, y = NULL, susie_ash_fit = NULL, ...) {
   if (is.null(susie_ash_fit)) {
     # get susie_ash_fit object
-    susie_ash_fit <- susie_wrapper(X, y, unmappable_effects = "ash", standardize = FALSE, intercept = FALSE, ...)
+    susie_ash_fit <- susie_wrapper(X, y, unmappable_effects = "ash", convergence_method = "pip", ...)
   }
   if (!is.null(X)) {
     if (length(susie_ash_fit$pip) != ncol(X)) {
@@ -385,7 +385,7 @@ susie_ash_weights <- function(X = NULL, y = NULL, susie_ash_fit = NULL, ...) {
       ))
     }
   }
-  if ("alpha" %in% names(susie_ash_fit) && "mu" %in% names(susie_ash_fit) && "X_column_scale_factors" %in% names(susie_ash_fit)) {
+  if ("alpha" %in% names(susie_ash_fit) && "mu" %in% names(susie_ash_fit) && "theta" %in% names(susie_ash_fit) && "X_column_scale_factors" %in% names(susie_ash_fit)) {
     # This is designed to cope with output from pecotmr::susie_post_processor()
     # We set intercept to 0 and later trim it off anyways
     susie_ash_fit$intercept <- 0
@@ -400,7 +400,7 @@ susie_ash_weights <- function(X = NULL, y = NULL, susie_ash_fit = NULL, ...) {
 susie_inf_weights <- function(X = NULL, y = NULL, susie_inf_fit = NULL, ...) {
   if (is.null(susie_inf_fit)) {
     # get susie_inf_fit object
-    susie_inf_fit <- susie_wrapper(X, y, unmappable_effects = "inf", standardize = FALSE, intercept = FALSE, ...)
+    susie_inf_fit <- susie_wrapper(X, y, unmappable_effects = "inf", convergence_method = "pip", ...)
   }
   if (!is.null(X)) {
     if (length(susie_inf_fit$pip) != ncol(X)) {
@@ -410,7 +410,7 @@ susie_inf_weights <- function(X = NULL, y = NULL, susie_inf_fit = NULL, ...) {
       ))
     }
   }
-  if ("alpha" %in% names(susie_inf_fit) && "mu" %in% names(susie_inf_fit) && "X_column_scale_factors" %in% names(susie_inf_fit)) {
+  if ("alpha" %in% names(susie_inf_fit) && "mu" %in% names(susie_inf_fit) && "theta" %in% names(susie_inf_fit) && "X_column_scale_factors" %in% names(susie_inf_fit)) {
     # This is designed to cope with output from pecotmr::susie_post_processor()
     # We set intercept to 0 and later trim it off anyways
     susie_inf_fit$intercept <- 0
