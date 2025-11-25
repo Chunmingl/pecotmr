@@ -1163,6 +1163,7 @@ batch_load_twas_weights <- function(twas_weights_results, meta_data_df, max_memo
   )
 
   # Merge with meta_data_df to get TSS information
+  meta_data_df <- meta_data_df[!duplicated(meta_data_df[, c("region_id", "TSS")]), ]
   gene_memory_df <- merge(gene_memory_df, meta_data_df[, c("region_id", "TSS")],
     by.x = "gene_name",
     by.y = "region_id", all.x = TRUE

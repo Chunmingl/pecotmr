@@ -576,7 +576,7 @@ twas_pipeline <- function(twas_weights_data,
     }
   }
   if (length(twas_weights_data)==0) {
-    return(NULL)
+    return(list(NULL))
   }
 
   # harmonize twas weights and gwas sumstats against LD
@@ -686,7 +686,7 @@ twas_pipeline <- function(twas_weights_data,
   gc()
   twas_results_db <- twas_results_db[!sapply(twas_results_db, function(x) is.null(x) || (is.list(x) && all(sapply(x, is.null))))]
   if (length(twas_results_db) == 0) {
-    return(NULL)
+    return(list(NULL))
   }
   twas_results_table <- do.call(rbind, lapply(twas_results_db, function(x) x$twas_table))
   mr_results <- do.call(rbind, lapply(twas_results_db, function(x) x$mr_result))
