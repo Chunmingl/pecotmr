@@ -172,8 +172,8 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file,
           rownames(weights_matrix_subset) <- weights_matrix_qced$target_data_qced$variant_id # weight variant names are flipped/corrected
 
           # intersect post-qc gwas and post-qc weight variants
-          gwas_LD_variants <- intersect(gwas_data_sumstats$variant_id, LD_list$combined_LD_variants)
-          weights_matrix_subset <- weights_matrix_subset[rownames(weights_matrix_subset) %in% gwas_LD_variants, , drop = FALSE]
+          gwas_LD_variants <- intersect(gsub("chr","", gwas_data_sumstats$variant_id), gsub("chr","", LD_list$combined_LD_variants))
+          weights_matrix_subset <- weights_matrix_subset[rownames(weights_matrix_subset) %in% gsub("chr","", gwas_data_sumstats$variant_id), , drop = FALSE]
           if (nrow(weights_matrix_subset) == 0) next
           postqc_weight_variants <- rownames(weights_matrix_subset)
 
@@ -222,7 +222,7 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file,
           results[[molecular_id]][["weights_qced"]][[context]][[study]] <- list(scaled_weights = weights_matrix_subset * sqrt(variance), weights = weights_matrix_subset)
         }
         # Combine gwas sumstat across different context for a single context group based on all variants included in this molecular_id/gene/region
-        gwas_data_sumstats$variant_id <- paste0("chr", gwas_data_sumstats$variant_id)
+        gwas_data_sumstats$variant_id <- ifelse(startsWith(gwas_data_sumstats$variant_id, "chr"), gwas_data_sumstats$variant_id, paste0("chr", gwas_data_sumstats$variant_id))
         gwas_data_sumstats <- gwas_data_sumstats[gwas_data_sumstats$variant_id %in% unique(find_data(results[[molecular_id]][["variant_names"]], c(2, study))), , drop = FALSE]
         results[[molecular_id]][["gwas_qced"]][[study]] <- rbind(results[[molecular_id]][["gwas_qced"]][[study]], gwas_data_sumstats)
         results[[molecular_id]][["gwas_qced"]][[study]] <- results[[molecular_id]][["gwas_qced"]][[study]][!duplicated(results[[molecular_id]][["gwas_qced"]][[study]][, c("variant_id", "z")]), ]
@@ -234,9 +234,10 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file,
     if (is.null(all_molecular_variants)) {
       results[[molecular_id]] <- NULL
     } else {
-      var_indx <- match(all_molecular_variants, paste0("chr", LD_list$combined_LD_variants))
+      var_indx <- match(all_molecular_variants, ifelse(startsWith(LD_list$combined_LD_variants, "chr"), LD_list$combined_LD_variants, paste0("chr", LD_list$combined_LD_variants)))
       results[[molecular_id]][["LD"]] <- as.matrix(LD_list$combined_LD_matrix[var_indx, var_indx])
-      rownames(results[[molecular_id]][["LD"]]) <- colnames(results[[molecular_id]][["LD"]]) <- paste0("chr", colnames(results[[molecular_id]][["LD"]]))
+      rownames(results[[molecular_id]][["LD"]]) <- colnames(results[[molecular_id]][["LD"]]) <- ifelse(startsWith(colnames(results[[molecular_id]][["LD"]]), "chr"), 
+                                        colnames(results[[molecular_id]][["LD"]]), paste0("chr", colnames(results[[molecular_id]][["LD"]])))
     }
   }
   # return results
