@@ -295,37 +295,170 @@ create_combined_LD_matrix <- function(LD_matrices, variants) {
 
 #' Load and Process Linkage Disequilibrium (LD) Matrix
 #'
-#' @param LD_meta_file_path path of LD_metadata, LD_metadata is a data frame specifying LD blocks with
-#' columns "chrom", "start", "end", and "path". "start" and "end" denote the positions of LD blocks.
-#' "path" is the path of each LD block, optionally including bim file paths.
-#' @param region A data frame specifying region of interest with columns "chrom", "start", and "end".
-#' @param extract_coordinates Optional data frame with columns "chrom" and "pos" for specific coordinates extraction.
+#' Unified entry point for loading LD data. Auto-detects the source type:
+#' \itemize{
+#'   \item Pre-computed LD blocks (metadata file with chrom/start/end/path columns)
+#'   \item PLINK2 genotype files (.pgen/.pvar[.zst]/.psam + .afreq)
+#'   \item PLINK1 genotype files (.bed/.bim/.fam)
+#' }
+#' For PLINK genotype sources, LD is computed on the fly via \code{compute_LD()}.
 #'
-#' @return A list of processed LD matrices and associated variant data frames for region of interest.
-#' Each element of the list contains:
+#' @param LD_meta_file_path Path to LD metadata file, or prefix for PLINK genotype files.
+#' @param region Region of interest: "chr:start-end" string or data.frame with chrom/start/end.
+#' @param extract_coordinates Optional data.frame with columns "chrom" and "pos" for
+#'   specific coordinates extraction (only for pre-computed LD blocks).
+#' @param return_genotype If TRUE, return the genotype matrix X instead of the LD
+#'   correlation matrix R. Only valid for PLINK genotype sources.
+#' @param n_sample Optional sample size for computing variance (= 2*p*(1-p)*n/(n-1)).
+#'   If NULL, ref_panel will not include variance or n_nomiss columns.
+#'   Only used for PLINK genotype sources.
+#'
+#' @return A list with:
 #' \describe{
-#' \item{combined_LD_variants}{A data frame merging selected variants within each LD block in bim file format with columns "chrom", "variants",
-#' "GD", "pos", "A1", and "A2".}
-#' \item{combined_LD_matrix}{The LD matrix for each region, with row and column names matching variant identifiers.}
-#' \item{block_indices}{A data frame tracking the indices of variants in the combined matrix by LD block,
-#' with columns "block_id", "start_idx", "end_idx", "chrom", "block_start", "block_end" to facilitate
-#' further partitioning if needed.}
+#'   \item{combined_LD_variants}{Character vector of variant IDs (canonical format).}
+#'   \item{combined_LD_matrix}{Symmetric LD correlation matrix (or genotype matrix if return_genotype=TRUE).}
+#'   \item{ref_panel}{Data.frame with variant metadata (chrom, pos, A2, A1, variant_id,
+#'     and optionally allele_freq, variance, n_nomiss).}
+#'   \item{block_metadata}{Data.frame with block info (block_id, chrom, size, start_idx, end_idx).}
 #' }
 #' @export
-load_LD_matrix <- function(LD_meta_file_path, region, extract_coordinates = NULL) {
-  # Intersect LD metadata with specified regions using updated function
+load_LD_matrix <- function(LD_meta_file_path, region, extract_coordinates = NULL,
+                           return_genotype = FALSE, n_sample = NULL) {
+  source_type <- detect_ld_source_type(LD_meta_file_path)
+
+  if (source_type %in% c("plink1", "plink2")) {
+    return(load_LD_from_genotype(LD_meta_file_path, region, source_type,
+                                 return_genotype = return_genotype,
+                                 n_sample = n_sample))
+  }
+
+  # Pre-computed LD blocks
+  if (return_genotype) {
+    stop("return_genotype=TRUE requires PLINK genotype files, not pre-computed LD matrices.")
+  }
+  load_LD_from_blocks(LD_meta_file_path, region, extract_coordinates)
+}
+
+# ---------- Internal: detect source type ----------
+
+#' Detect whether a path points to PLINK2, PLINK1, or pre-computed LD metadata.
+#' @return Character: "plink2", "plink1", or "ld_meta".
+#' @noRd
+detect_ld_source_type <- function(path) {
+  # PLINK2: prefix.pgen + prefix.pvar[.zst] + prefix.psam
+  if (file.exists(paste0(path, ".pgen")) &&
+      (file.exists(paste0(path, ".pvar")) || file.exists(paste0(path, ".pvar.zst"))) &&
+      file.exists(paste0(path, ".psam"))) {
+    return("plink2")
+  }
+  # PLINK1: prefix.bed + prefix.bim + prefix.fam
+  if (file.exists(paste0(path, ".bed")) &&
+      file.exists(paste0(path, ".bim")) &&
+      file.exists(paste0(path, ".fam"))) {
+    return("plink1")
+  }
+  # Pre-computed LD metadata (text file)
+  if (file.exists(path)) {
+    return("ld_meta")
+  }
+  stop("Cannot determine LD source type from path: ", path,
+       "\n  Expected: PLINK2 prefix (.pgen/.pvar[.zst]/.psam), ",
+       "PLINK1 prefix (.bed/.bim/.fam), or LD metadata file.")
+}
+
+# ---------- Internal: load LD from genotype files ----------
+
+#' Load genotype data from PLINK files and compute LD or return genotype matrix.
+#' @param source_type Character, "plink1" or "plink2" (from detect_ld_source_type).
+#' @noRd
+load_LD_from_genotype <- function(prefix, region, source_type,
+                                  return_genotype = FALSE, n_sample = NULL) {
+  # Load genotype matrix and variant info
+  result <- if (source_type == "plink2") {
+    load_plink2_data(prefix, region = region)
+  } else {
+    load_plink1_data(prefix, region = region)
+  }
+  X <- result$X
+  variant_info <- result$variant_info
+
+  # Normalize variant IDs to canonical format (chr:pos:A2:A1)
+  variant_ids <- normalize_variant_id(
+    format_variant_id(variant_info$chrom, variant_info$pos, variant_info$A2, variant_info$A1)
+  )
+  colnames(X) <- variant_ids
+
+  # Build ref_panel
+  ref_panel <- parse_variant_id(variant_ids)
+  ref_panel$variant_id <- variant_ids
+
+  # Load allele frequency from .afreq file (required for PLINK sources)
+  afreq <- read_afreq(prefix)
+  if (is.null(afreq)) {
+    stop("Allele frequency file (.afreq or .afreq.zst) not found at prefix: ", prefix,
+         "\n  The .afreq file is required for PLINK genotype LD sources.")
+  }
+  freq_match <- match(variant_info$id, afreq$id)
+  n_unmatched <- sum(is.na(freq_match))
+  if (n_unmatched > 0) {
+    warning(n_unmatched, " out of ", length(freq_match),
+            " variants have no allele frequency in .afreq file.")
+  }
+  ref_panel$allele_freq <- afreq$alt_freq[freq_match]
+
+  # Compute variance if sample size provided
+  if (!is.null(n_sample)) {
+    p <- ref_panel$allele_freq
+    ref_panel$variance <- 2 * p * (1 - p) * n_sample / (n_sample - 1)
+    ref_panel$n_nomiss <- n_sample
+  }
+
+  # Block metadata (single block for genotype-based LD)
+  block_metadata <- data.frame(
+    block_id = 1L,
+    chrom = as.character(variant_info$chrom[1]),
+    size = length(variant_ids),
+    start_idx = 1L,
+    end_idx = length(variant_ids),
+    stringsAsFactors = FALSE
+  )
+
+  if (return_genotype) {
+    # Note: combined_LD_matrix holds the genotype matrix X (not LD) when return_genotype=TRUE
+    return(list(
+      combined_LD_variants = variant_ids,
+      combined_LD_matrix = X,
+      ref_panel = ref_panel,
+      block_metadata = block_metadata
+    ))
+  }
+
+  # Compute LD correlation matrix
+  R <- compute_LD(X, method = "sample")
+
+  list(
+    combined_LD_variants = variant_ids,
+    combined_LD_matrix = R,
+    ref_panel = ref_panel,
+    block_metadata = block_metadata
+  )
+}
+
+# ---------- Internal: load LD from pre-computed blocks ----------
+
+#' Load pre-computed LD from block-based metadata files.
+#' @noRd
+load_LD_from_blocks <- function(LD_meta_file_path, region, extract_coordinates = NULL) {
+  # Intersect LD metadata with specified regions
   intersected_LD_files <- get_regional_ld_meta(LD_meta_file_path, region)
 
-  # Extract file paths for LD and bim files
   LD_file_paths <- intersected_LD_files$intersections$LD_file_paths
   bim_file_paths <- intersected_LD_files$intersections$bim_file_paths
 
-  # Using a for loop here to allow for rm() in each loop to save memory
   extracted_LD_matrices_list <- list()
   extracted_LD_variants_list <- list()
   block_chroms <- character(length(LD_file_paths))
 
-  # Process each LD block individually
   for (j in seq_along(LD_file_paths)) {
     LD_matrix_processed <- process_LD_matrix(LD_file_paths[j], bim_file_paths[j])
     extracted_LD_list <- extract_LD_for_region(
@@ -339,20 +472,16 @@ load_LD_matrix <- function(LD_meta_file_path, region, extract_coordinates = NULL
     if (nrow(extracted_LD_variants_list[[j]]) > 0) {
       block_chroms[j] <- as.character(extracted_LD_variants_list[[j]]$chrom[1])
     } else {
-      # Use region chromosome as fallback for empty blocks
       block_chroms[j] <- as.character(intersected_LD_files$region$chrom)
     }
   }
 
-  # Create combined LD matrix
   combined_LD_matrix <- create_combined_LD_matrix(
     LD_matrices = extracted_LD_matrices_list,
     variants = extracted_LD_variants_list
   )
-  # Variants are already in canonical format (chr prefix) from process_LD_matrix / normalize_variant_id
   combined_LD_variants <- rownames(combined_LD_matrix)
 
-  # Build block metadata — variants already in canonical format, no normalization needed
   block_variants <- lapply(extracted_LD_variants_list, function(v) v$variants)
   block_metadata <- data.frame(
     block_id = seq_along(LD_file_paths),
@@ -363,70 +492,96 @@ load_LD_matrix <- function(LD_meta_file_path, region, extract_coordinates = NULL
     stringsAsFactors = FALSE
   )
 
-  # Remove large objects to free memory
   rm(extracted_LD_matrices_list)
 
-  # Create reference panel from canonical variant IDs
   ref_panel <- parse_variant_id(rownames(combined_LD_matrix))
   merged_variant_list <- do.call(rbind, extracted_LD_variants_list)
   ref_panel$variant_id <- rownames(combined_LD_matrix)
 
+  if ("allele_freq" %in% colnames(merged_variant_list)) {
+    ref_panel$allele_freq <- merged_variant_list$allele_freq[match(rownames(combined_LD_matrix), merged_variant_list$variants)]
+  }
   if ("variance" %in% colnames(merged_variant_list)) {
     ref_panel$variance <- merged_variant_list$variance[match(rownames(combined_LD_matrix), merged_variant_list$variants)]
   }
+  if ("n_nomiss" %in% colnames(merged_variant_list)) {
+    ref_panel$n_nomiss <- merged_variant_list$n_nomiss[match(rownames(combined_LD_matrix), merged_variant_list$variants)]
+  }
 
-  # Return the combined LD list
-  combined_LD_list <- list(
+  list(
     combined_LD_variants = combined_LD_variants,
     combined_LD_matrix = combined_LD_matrix,
     ref_panel = ref_panel,
     block_metadata = block_metadata
   )
-
-  return(combined_LD_list)
 }
 
 #' Filter variants by LD Reference
 #'
-#' @param variant_ids variant names in the format chr:pos_ref_alt or chr:pos:ref:alt.
-#' @param ld_reference_meta_file A data frame similar to 'genomic_data' in get_regional_ld_meta function.
-#' @return A subset of variants, filtered based on LD reference data.
-#' @importFrom stringr str_split
-#' @importFrom dplyr select group_by summarise
+#' Filters a vector of variant IDs to those present in the LD reference panel.
+#' Auto-detects the reference type (PLINK2, PLINK1, or pre-computed LD metadata).
+#'
+#' @param variant_ids variant names in the format chr:pos:ref:alt.
+#' @param ld_reference_meta_file Path to LD metadata file or PLINK prefix.
+#' @param keep_indel Whether to keep indel variants. Default TRUE.
+#' @return A list with:
+#'   \item{data}{Character vector of filtered variant IDs.}
+#'   \item{idx}{Integer vector of indices into the original variant_ids.}
+#' @importFrom dplyr group_by summarise
 #' @importFrom vroom vroom
+#' @importFrom magrittr %>%
 #' @export
 filter_variants_by_ld_reference <- function(variant_ids, ld_reference_meta_file, keep_indel = TRUE) {
-  # Step 1: Process variant IDs into a data frame and filter out non-standard nucleotides
-  variants_df <- do.call(rbind, lapply(strsplit(variant_ids, ":"), function(x) {
-    data.frame(chrom = x[1], pos = as.integer(x[2]), ref = x[3], alt = x[4])
-  }))
+  # Parse input variant IDs
+  variants_df <- parse_variant_id(variant_ids)
 
-  variants_df$chrom <- as.integer(strip_chr_prefix(variants_df$chrom))
-  # Step 2: Derive region information from the variants data frame
+  # Derive region for ld_meta path (needed to find intersecting blocks)
   region_df <- variants_df %>%
     group_by(chrom) %>%
     summarise(start = min(pos), end = max(pos))
-  # Step 3: Call get_regional_ld_meta to get bim_file_paths
-  bim_file_paths <- get_regional_ld_meta(ld_reference_meta_file, region_df)$intersections$bim_file_paths
 
-  # Step 4: Load bim files and consolidate into a single data frame
-  bim_data <- lapply(bim_file_paths, function(path) {
-    bim_df <- vroom(path, col_names = FALSE)
-    data.frame(chrom = bim_df$X1, pos = bim_df$X4, stringsAsFactors = FALSE)
-  }) %>%
-    do.call("rbind", .)
+  source_type <- detect_ld_source_type(ld_reference_meta_file)
 
-  # Step 5: Overlap the variants data frame with bim_data
-  keep_indices <- which(paste(variants_df$chrom, variants_df$pos) %in% paste(bim_data$chrom, bim_data$pos))
+  if (source_type == "plink2") {
+    pvar_path <- resolve_plink2_paths(ld_reference_meta_file)$pvar
+    pvar <- pgenlibr::NewPvar(pvar_path)
+    on.exit(pgenlibr::ClosePvar(pvar), add = TRUE)
+    ref_info <- read_pvar_info(pvar)
+    ref_chrom <- as.integer(strip_chr_prefix(ref_info$chrom))
+    # Filter to relevant region(s)
+    in_region <- ref_chrom %in% region_df$chrom &
+                 ref_info$pos >= region_df$start[match(ref_chrom, region_df$chrom)] &
+                 ref_info$pos <= region_df$end[match(ref_chrom, region_df$chrom)]
+    ref_key <- paste0(ref_chrom[in_region], ":", ref_info$pos[in_region])
+  } else if (source_type == "plink1") {
+    bim_data <- read_bim(paste0(ld_reference_meta_file, ".bed"))
+    ref_chrom <- as.integer(strip_chr_prefix(bim_data$chrom))
+    in_region <- ref_chrom %in% region_df$chrom &
+                 bim_data$pos >= region_df$start[match(ref_chrom, region_df$chrom)] &
+                 bim_data$pos <= region_df$end[match(ref_chrom, region_df$chrom)]
+    ref_key <- paste0(ref_chrom[in_region], ":", bim_data$pos[in_region])
+  } else {
+    # Pre-computed LD: read bim files via metadata
+    bim_file_paths <- get_regional_ld_meta(ld_reference_meta_file, region_df)$intersections$bim_file_paths
+    bim_data <- do.call(rbind, lapply(bim_file_paths, function(path) {
+      bim_df <- vroom(path, col_names = FALSE)
+      data.frame(chrom = bim_df$X1, pos = bim_df$X4, stringsAsFactors = FALSE)
+    }))
+    ref_key <- paste0(bim_data$chrom, ":", bim_data$pos)
+  }
+
+  variant_key <- paste0(variants_df$chrom, ":", variants_df$pos)
+  keep_indices <- which(variant_key %in% ref_key)
+
   if (!keep_indel) {
-    snp_idx <- which(is_snp_alleles(variants_df$ref, variants_df$alt))
+    snp_idx <- which(is_snp_alleles(variants_df$A1, variants_df$A2))
     keep_indices <- intersect(keep_indices, snp_idx)
   }
-  variants_filtered <- variant_ids[keep_indices]
 
-  message(length(variant_ids) - length(keep_indices), " out of ", length(variant_ids), " total variants dropped due to absence on the reference LD panel.")
+  message(length(variant_ids) - length(keep_indices), " out of ", length(variant_ids),
+          " total variants dropped due to absence on the reference LD panel.")
 
-  return(list(data = variants_filtered, idx = keep_indices))
+  list(data = variant_ids[keep_indices], idx = keep_indices)
 }
 
 #' Partition LD Matrix into Block-Specific Matrices
