@@ -1,21 +1,4 @@
 # read PLINK files
-#' @importFrom dplyr rename
-#' @importFrom vroom vroom
-#' @importFrom tools file_path_sans_ext
-read_pvar <- function(pgen) {
-  pvarf <- paste0(file_path_sans_ext(pgen), ".pvar")
-  # Find the #CHROM header line (skip metadata/comment lines above it)
-  header_lines <- readLines(pvarf, n = 500)
-  header_idx <- grep("^#CHROM", header_lines)[1]
-  if (is.na(header_idx)) stop("Could not find #CHROM header in ", pvarf)
-  pvardt <- as.data.frame(vroom(pvarf, delim = "\t", skip = header_idx - 1, show_col_types = FALSE))
-  pvardt <- rename(pvardt,
-    "chrom" = "#CHROM", "pos" = "POS",
-    "alt" = "ALT", "ref" = "REF", "id" = "ID"
-  )
-  pvardt <- select(pvardt, chrom, id, pos, alt, ref)
-  return(pvardt)
-}
 
 #' @importFrom vroom vroom
 #' @importFrom tools file_path_sans_ext
@@ -28,32 +11,13 @@ read_bim <- function(bed) {
 
 #' @importFrom vroom vroom
 #' @importFrom tools file_path_sans_ext
-read_psam <- function(pgen) {
-  psamf <- paste0(file_path_sans_ext(pgen), ".psam")
-  psam <- vroom(psamf)
-  colnames(psam)[1:2] <- c("FID", "IID")
-  return(psam)
-}
-
-#' @importFrom vroom vroom
-#' @importFrom tools file_path_sans_ext
 read_fam <- function(bed) {
   famf <- paste0(file_path_sans_ext(bed), ".fam")
   return(vroom(famf, col_names = FALSE))
 }
 
-# open pgen/pvar PLINK 2 data format
-open_pgen <- function(pgenf) {
-  # Make sure pgenlibr is installed
-  if (!requireNamespace("pgenlibr", quietly = TRUE)) {
-    stop("To use this function, please install pgenlibr: https://cran.r-project.org/web/packages/pgenlibr/index.html")
-  }
-  return(pgenlibr::NewPgen(pgenf))
-}
-
 # open bed/bim/fam: A PLINK 1 .bed is a valid .pgen
 open_bed <- function(bed) {
-  # Make sure pgenlibr is installed
   if (!requireNamespace("pgenlibr", quietly = TRUE)) {
     stop("To use this function, please install pgenlibr: https://cran.r-project.org/web/packages/pgenlibr/index.html")
   }
@@ -61,19 +25,176 @@ open_bed <- function(bed) {
   return(pgenlibr::NewPgen(bed, raw_sample_ct = raw_s_ct))
 }
 
-read_pgen <- function(pgen, variantidx = NULL, meanimpute = F) {
-  # Make sure pgenlibr is installed
-  if (!requireNamespace("pgenlibr", quietly = TRUE)) {
-    stop("To use this function, please install pgenlibr: https://cran.r-project.org/web/packages/pgenlibr/index.html")
+#' Read a PLINK2 allele frequency file (.afreq or .afreq.zst)
+#'
+#' @param prefix File prefix (without .afreq extension).
+#' @return A data.frame with columns: chrom, id, A2 (REF), A1 (ALT), alt_freq, obs_ct.
+#'   alt_freq is the frequency of the A1 (ALT/effect) allele.
+#' @importFrom vroom vroom
+#' @importFrom dplyr rename select
+#' @export
+read_afreq <- function(prefix) {
+  afreq_zst <- paste0(prefix, ".afreq.zst")
+  afreq_plain <- paste0(prefix, ".afreq")
+  if (file.exists(afreq_zst)) {
+    if (Sys.which("zstd") == "") stop("zstd CLI is required to read .afreq.zst files")
+    af <- as.data.frame(vroom(pipe(paste0("zstd -dcq ", shQuote(afreq_zst))),
+                              delim = "\t", show_col_types = FALSE))
+  } else if (file.exists(afreq_plain)) {
+    af <- as.data.frame(vroom(afreq_plain, delim = "\t", show_col_types = FALSE))
+  } else {
+    return(NULL)
   }
-  if (is.null(variantidx)) {
-    variantidx <- 1:pgenlibr::GetVariantCt(pgen)
+  # PLINK2 .afreq: REF = A2, ALT = A1, ALT_FREQS = A1 (effect allele) frequency
+  af <- rename(af,
+    "chrom" = "#CHROM", "id" = "ID",
+    "A2" = "REF", "A1" = "ALT",
+    "alt_freq" = "ALT_FREQS", "obs_ct" = "OBS_CT"
+  )
+  af <- select(af, chrom, id, A2, A1, alt_freq, obs_ct)
+  return(af)
+}
+
+#' Load PLINK2 genotype data using plink2 CLI
+#'
+#' Loads genotype data from PLINK2 format files (.pgen/.pvar/.psam), including
+#' zstd-compressed versions (.pgen.zst/.pvar.zst/.psam.zst). The plink2 CLI
+#' reads all .zst files natively via the \code{vzs} modifier. Optionally
+#' extracts a genomic region and merges allele frequency information.
+#'
+#' Dosage convention: X contains ALT/A1 (effect allele) dosage counts (0, 1, 2),
+#' consistent with the PLINK1 path in \code{load_genotype_region()} which returns
+#' A1 dosage via \code{2 - as(geno_bed, "numeric")}.
+#'
+#' @param prefix File prefix (without extension). Files should be at
+#'   prefix.pgen[.zst], prefix.pvar[.zst], prefix.psam[.zst].
+#' @param region Target region in format "chr:start-end" (e.g., "chr1:1000-2000").
+#'   If NULL, loads all variants.
+#' @param keep_indel Whether to keep indel variants. Default TRUE.
+#' @param keep_variants_path Path to a file listing variants to keep. Default NULL.
+#' @return A list with:
+#'   \item{X}{Numeric ALT/A1 dosage matrix. Rows are samples named by IID
+#'     (individual ID from .psam). Columns are variants named by the ID column
+#'     from .pvar. Values 0/1/2 count copies of the A1 (ALT/effect) allele.}
+#'   \item{variant_info}{Data.frame with columns: chrom, id, pos, A2 (REF allele),
+#'     A1 (ALT/effect allele). If a .afreq[.zst] file exists at the same prefix,
+#'     also includes alt_freq (A1 frequency) and obs_ct.}
+#'
+#' @importFrom vroom vroom
+#' @importFrom dplyr rename select filter mutate
+#' @importFrom magrittr %>%
+#' @export
+load_plink2_data <- function(prefix, region = NULL, keep_indel = TRUE, keep_variants_path = NULL) {
+  if (Sys.which("plink2") == "") {
+    stop("plink2 CLI is required. Install from https://www.cog-genomics.org/plink/2.0/")
+  }
+  if (!requireNamespace("pgenlibr", quietly = TRUE)) {
+    stop("pgenlibr is required. Install from https://cran.r-project.org/web/packages/pgenlibr/index.html")
   }
 
-  pgenlibr::ReadList(pgen,
-    variant_subset = variantidx,
-    meanimpute = meanimpute
+  # Detect whether files are zst-compressed or plain
+  has_zst <- file.exists(paste0(prefix, ".pgen.zst"))
+  has_plain <- file.exists(paste0(prefix, ".pgen"))
+  if (!has_zst && !has_plain) {
+    stop("PLINK2 .pgen[.zst] file not found at prefix: ", prefix)
+  }
+  pvar_ok <- file.exists(paste0(prefix, ".pvar.zst")) || file.exists(paste0(prefix, ".pvar"))
+  psam_ok <- file.exists(paste0(prefix, ".psam.zst")) || file.exists(paste0(prefix, ".psam"))
+  if (!pvar_ok || !psam_ok) {
+    stop("Complete PLINK2 fileset (.pgen/.pvar/.psam) not found at prefix: ", prefix)
+  }
+
+  # plink2 reads all .zst files natively with the vzs modifier
+  out_prefix <- tempfile(pattern = "plink2_out_")
+  on.exit(unlink(paste0(out_prefix, c(".pgen", ".pvar", ".psam", ".log")), force = TRUE), add = TRUE)
+
+  vzs_flag <- if (has_zst) " vzs" else ""
+  cmd <- paste0("plink2 --pfile ", shQuote(prefix), vzs_flag)
+  if (!is.null(region)) {
+    parsed <- parse_region(region)
+    cmd <- paste0(cmd, " --chr ", parsed$chrom,
+                  " --from-bp ", parsed$start,
+                  " --to-bp ", parsed$end)
+  }
+  cmd <- paste0(cmd, " --make-pgen --out ", shQuote(out_prefix))
+
+  ret <- system(cmd, intern = FALSE, ignore.stdout = TRUE, ignore.stderr = TRUE)
+  if (ret != 0) {
+    log_file <- paste0(out_prefix, ".log")
+    log_msg <- if (file.exists(log_file)) paste(readLines(log_file), collapse = "\n") else "unknown error"
+    stop("plink2 failed (exit code ", ret, "):\n", log_msg)
+  }
+  if (!file.exists(paste0(out_prefix, ".pgen"))) {
+    log_file <- paste0(out_prefix, ".log")
+    log_msg <- if (file.exists(log_file)) paste(readLines(log_file), collapse = "\n") else ""
+    stop("plink2 produced no output. ", log_msg)
+  }
+
+  # Read pvar output — variant annotation
+  pvar_out <- paste0(out_prefix, ".pvar")
+  header_lines <- readLines(pvar_out, n = 500)
+  header_idx <- grep("^#CHROM", header_lines)[1]
+  if (is.na(header_idx)) stop("Could not find #CHROM header in plink2 output .pvar")
+  variant_info <- as.data.frame(vroom(pvar_out, delim = "\t", skip = header_idx - 1, show_col_types = FALSE))
+  # PLINK2 convention: REF = A2 (reference), ALT = A1 (effect allele)
+  variant_info <- rename(variant_info,
+    "chrom" = "#CHROM", "pos" = "POS",
+    "A1" = "ALT", "A2" = "REF", "id" = "ID"
   )
+  variant_info <- select(variant_info, chrom, id, pos, A2, A1)
+
+  # Read psam output — sample information (first column is #FID)
+  psam <- as.data.frame(vroom(paste0(out_prefix, ".psam"), delim = "\t", show_col_types = FALSE))
+  colnames(psam)[1:2] <- c("FID", "IID")
+
+  # Read genotype dosage via pgenlibr
+  pgen_obj <- pgenlibr::NewPgen(paste0(out_prefix, ".pgen"))
+  on.exit(pgenlibr::ClosePgen(pgen_obj), add = TRUE)
+  n_variants <- pgenlibr::GetVariantCt(pgen_obj)
+  if (n_variants == 0) {
+    stop(NoSNPsError(paste("No variants found", if (!is.null(region)) paste("in region", region) else "")))
+  }
+
+  # pgenlibr::ReadList returns ALT (A1) dosage: 0, 1, 2
+  # Consistent with PLINK1 path: 2 - as(geno_bed, "numeric") also gives A1 dosage
+  X <- pgenlibr::ReadList(pgen_obj, variant_subset = 1:n_variants, meanimpute = FALSE)
+  rownames(X) <- psam$IID    # rows named by individual ID
+  colnames(X) <- variant_info$id  # columns named by variant ID from .pvar
+
+  # Merge allele frequency if .afreq[.zst] exists
+  afreq <- read_afreq(prefix)
+  if (!is.null(afreq)) {
+    variant_info <- merge(variant_info, afreq[, c("id", "alt_freq", "obs_ct")],
+                          by = "id", all.x = TRUE, sort = FALSE)
+  }
+
+  # Filter indels
+  if (!keep_indel) {
+    is_snp <- nchar(variant_info$A2) == 1 & nchar(variant_info$A1) == 1 &
+              grepl("^[ATCG]$", variant_info$A2) & grepl("^[ATCG]$", variant_info$A1)
+    X <- X[, is_snp, drop = FALSE]
+    variant_info <- variant_info[is_snp, , drop = FALSE]
+  }
+
+  # Filter to specified variants
+  if (!is.null(keep_variants_path)) {
+    keep_variants <- as.data.frame(vroom(keep_variants_path, show_col_types = FALSE))
+    if (!("chrom" %in% names(keep_variants)) | !("pos" %in% names(keep_variants))) {
+      # Parse canonical variant IDs (chr:pos:A2:A1)
+      keep_variants <- do.call(rbind, lapply(strsplit(normalize_variant_id(keep_variants[[1]]), ":", fixed = TRUE), function(x) {
+        data.frame(chrom = x[1], pos = as.integer(x[2]), A2 = x[3], A1 = x[4])
+      }))
+    }
+    if (any(grepl("^chr", keep_variants$chrom))) {
+      keep_variants <- keep_variants %>% mutate(chrom = gsub("^chr", "", chrom))
+    }
+    vi_chrom <- gsub("^chr", "", as.character(variant_info$chrom))
+    keep_idx <- paste0(vi_chrom, ":", variant_info$pos) %in% paste0(keep_variants$chrom, ":", keep_variants$pos)
+    X <- X[, keep_idx, drop = FALSE]
+    variant_info <- variant_info[keep_idx, , drop = FALSE]
+  }
+
+  return(list(X = X, variant_info = variant_info))
 }
 
 #' @importFrom vroom vroom
@@ -122,52 +243,52 @@ NoSNPsError <- function(message) {
   structure(list(message = message), class = c("NoSNPsError", "error", "condition"))
 }
 
-#' Load genotype data for a specific region using vroom for efficiency
+#' Load genotype data for a specific region
 #'
-#' By default, plink usage dosage of the *major* allele, since "effect allele" A1 is
-#' usually the minor allele and the code "1" refers to the "other allele" A2,
-#' so that "11" is A2/A2 or major/major. We always use effect allele dosage, to
-#' be more consistent with the minor allele based convention ie, plink --recodeA which used minor allele
-#' dosage by default.
+#' Supports PLINK2 format (.pgen/.pvar/.psam, including .zst compressed) via plink2 CLI,
+#' and PLINK1 format (.bed/.bim/.fam) via snpStats. PLINK2 format is preferred when available.
+#'
+#' For PLINK1: uses effect allele dosage (minor allele based convention, consistent with plink --recodeA).
 #'
 #' @param genotype Path to the genotype data file (without extension).
 #' @param region The target region in the format "chr:start-end".
 #' @param keep_indel Whether to keep indel SNPs.
-#' @return A vector of SNP IDs in the specified region.
+#' @param keep_variants_path Path to a file listing variants to keep.
+#' @return A numeric dosage matrix (rows=samples, cols=variants).
 #'
 #' @importFrom vroom vroom
 #' @importFrom magrittr %>%
 #' @importFrom readr col_character col_guess col_integer
 #' @export
 load_genotype_region <- function(genotype, region = NULL, keep_indel = TRUE, keep_variants_path = NULL) {
-  # Validate genotype file set exists
+  # Check for PLINK2 format (including zst-compressed)
+  has_plink2 <- (file.exists(paste0(genotype, ".pgen")) || file.exists(paste0(genotype, ".pgen.zst"))) &&
+                (file.exists(paste0(genotype, ".pvar")) || file.exists(paste0(genotype, ".pvar.zst"))) &&
+                (file.exists(paste0(genotype, ".psam")) || file.exists(paste0(genotype, ".psam.zst")))
+
+  if (has_plink2) {
+    result <- load_plink2_data(genotype, region = region, keep_indel = keep_indel, keep_variants_path = keep_variants_path)
+    return(result$X)
+  }
+
+  # Fall back to PLINK1 format via snpStats
   bed_file <- paste0(genotype, ".bed")
   bim_file <- paste0(genotype, ".bim")
   fam_file <- paste0(genotype, ".fam")
-  pgen_file <- paste0(genotype, ".pgen")
-  pvar_file <- paste0(genotype, ".pvar")
-  psam_file <- paste0(genotype, ".psam")
-  has_plink1 <- all(file.exists(bed_file, bim_file, fam_file))
-  has_plink2 <- all(file.exists(pgen_file, pvar_file, psam_file))
-  if (!has_plink1 && !has_plink2) {
-    stop("Genotype files not found. Expected either .bed/.bim/.fam or .pgen/.pvar/.psam files at prefix: ", genotype)
+  if (!all(file.exists(bed_file, bim_file, fam_file))) {
+    stop("Genotype files not found. Expected .pgen/.pvar/.psam (or .zst), or .bed/.bim/.fam at prefix: ", genotype)
   }
-  # Make sure snpStats is installed
   if (!requireNamespace("snpStats", quietly = TRUE)) {
     stop("To use this function, please install snpStats: https://bioconductor.org/packages/release/bioc/html/snpStats.html")
   }
   if (!is.null(region)) {
-    # Get SNP IDs from bim file
     parsed_region <- parse_region(region)
     chrom <- parsed_region$chrom
     start <- parsed_region$start
     end <- parsed_region$end
-    # 6 columns for bim file
     col_types <- list(col_character(), col_character(), col_guess(), col_integer(), col_guess(), col_guess())
-    # Read a few lines of the bim file to check for 'chr' prefix
     bim_sample <- vroom(paste0(genotype, ".bim"), n_max = 5, col_names = FALSE, col_types = col_types)
     chr_prefix_present <- any(grepl("^chr", bim_sample$X1))
-    # Read the bim file and remove 'chr' prefix if present
     bim_data <- vroom(paste0(genotype, ".bim"), col_names = FALSE, col_types = col_types)
     if (chr_prefix_present) {
       bim_data$X1 <- gsub("^chr", "", bim_data$X1)
@@ -179,11 +300,8 @@ load_genotype_region <- function(genotype, region = NULL, keep_indel = TRUE, kee
   } else {
     snp_ids <- NULL
   }
-  # Read genotype data using snpStats read.plink
   geno <- snpStats::read.plink(genotype, select.snps = snp_ids)
 
-  # Remove indels if specified
-  # Remove indels if specified
   if (!keep_indel) {
     is_indel <- with(geno$map, grepl("[^ATCG]", allele.1) | grepl("[^ATCG]", allele.2) | nchar(allele.1) > 1 | nchar(allele.2) > 1)
     geno_bed <- geno$genotypes[, !is_indel]
@@ -196,12 +314,7 @@ load_genotype_region <- function(genotype, region = NULL, keep_indel = TRUE, kee
     keep_variants <- vroom(keep_variants_path)
     if (!("chrom" %in% names(keep_variants)) | !("pos" %in% names(keep_variants))) {
       keep_variants <- do.call(rbind, lapply(strsplit(normalize_variant_id(keep_variants[[1]]), ":", fixed = TRUE), function(x) {
-        data.frame(
-          chrom = x[1],
-          pos = as.integer(x[2]),
-          ref = x[3],
-          alt = x[4]
-        )
+        data.frame(chrom = x[1], pos = as.integer(x[2]), ref = x[3], alt = x[4])
       }))
     }
     if (any(grepl("^chr", keep_variants$chrom))) {
