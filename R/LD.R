@@ -319,7 +319,7 @@ create_LD_matrix <- function(LD_matrices, variants) {
 #'   \item{LD_matrix}{Symmetric LD correlation matrix (or genotype matrix if return_genotype=TRUE).}
 #'   \item{ref_panel}{Data.frame with variant metadata (chrom, pos, A2, A1, variant_id,
 #'     and optionally allele_freq, variance, n_nomiss).}
-#'   \item{block_metadata}{Data.frame with block info (block_id, chrom, size, start_idx, end_idx).}
+#'   \item{block_metadata}{Data.frame with block info (block_id, chrom, block_start, block_end, size, start_idx, end_idx).}
 #' }
 #' @export
 load_LD_matrix <- function(LD_meta_file_path, region, extract_coordinates = NULL,
@@ -413,10 +413,13 @@ load_LD_from_genotype <- function(prefix, region, source_type,
     ref_panel$n_nomiss <- n_sample
   }
 
-  # Block metadata (single block for genotype-based LD)
+  # Block metadata (single block spanning the loaded region)
+  positions <- variant_info$pos
   block_metadata <- data.frame(
     block_id = 1L,
     chrom = as.character(variant_info$chrom[1]),
+    block_start = min(positions),
+    block_end = max(positions),
     size = length(variant_ids),
     start_idx = 1L,
     end_idx = length(variant_ids),
@@ -483,9 +486,12 @@ load_LD_from_blocks <- function(LD_meta_file_path, region, extract_coordinates =
   LD_variants <- rownames(LD_matrix)
 
   block_variants <- lapply(extracted_LD_variants_list, function(v) v$variants)
+  block_positions <- lapply(extracted_LD_variants_list, function(v) v$pos)
   block_metadata <- data.frame(
     block_id = seq_along(LD_file_paths),
     chrom = block_chroms,
+    block_start = sapply(block_positions, min),
+    block_end = sapply(block_positions, max),
     size = sapply(block_variants, length),
     start_idx = sapply(block_variants, function(v) min(match(v, LD_variants))),
     end_idx = sapply(block_variants, function(v) max(match(v, LD_variants))),
