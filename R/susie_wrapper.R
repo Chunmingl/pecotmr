@@ -62,7 +62,7 @@ lbf_to_alpha <- function(lbf) {
 adjust_susie_weights <- function(twas_weights_results, keep_variants, allele_qc = TRUE,
                                  variable_name_obj = c("susie_results", context, "variant_names"),
                                  susie_obj = c("susie_results", context, "susie_result_trimmed"),
-                                 twas_weights_table = c("weights", context), combined_LD_variants, match_min_prop = 0.2) {
+                                 twas_weights_table = c("weights", context), LD_variants, match_min_prop = 0.2) {
   # Intersect the rownames of weights with keep_variants
   twas_weights_variants <- get_nested_element(twas_weights_results, variable_name_obj)
   # Normalize to canonical format (with chr prefix)
@@ -73,7 +73,7 @@ adjust_susie_weights <- function(twas_weights_results, keep_variants, allele_qc 
     if (!all(c("chrom", "pos", "A2", "A1") %in% colnames(weights_matrix))) {
       weights_matrix <- cbind(parse_variant_id(twas_weights_variants), weights_matrix)
     }
-    weights_matrix_qced <- allele_qc(weights_matrix, combined_LD_variants, colnames(weights_matrix)[!colnames(weights_matrix) %in% c(
+    weights_matrix_qced <- allele_qc(weights_matrix, LD_variants, colnames(weights_matrix)[!colnames(weights_matrix) %in% c(
       "chrom",
       "pos", "A2", "A1"
     )], match_min_prop = match_min_prop)

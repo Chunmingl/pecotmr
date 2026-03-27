@@ -2865,8 +2865,8 @@ test_that("harmonize_twas: group_contexts_by_region single context path (lines 4
   local_mocked_bindings(
     load_LD_matrix = function(...) {
       list(
-        combined_LD_matrix = mock_LD_matrix,
-        combined_LD_variants = mock_LD_variants,
+        LD_matrix = mock_LD_matrix,
+        LD_variants = mock_LD_variants,
         ref_panel = mock_ref_panel
       )
     },
@@ -2976,8 +2976,8 @@ test_that("harmonize_twas: group_contexts_by_region multi-context clustering (li
   local_mocked_bindings(
     load_LD_matrix = function(...) {
       list(
-        combined_LD_matrix = mock_LD_matrix,
-        combined_LD_variants = all_variant_ids,
+        LD_matrix = mock_LD_matrix,
+        LD_variants = all_variant_ids,
         ref_panel = data.frame(chrom = 1, pos = as.integer(sapply(strsplit(all_variant_ids, ":"), `[`, 2)),
                                A2 = "A", A1 = "T", stringsAsFactors = FALSE)
       )

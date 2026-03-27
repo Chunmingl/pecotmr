@@ -246,7 +246,7 @@ extract_LD_for_region <- function(LD_matrix, variants, region, extract_coordinat
 }
 
 # Create a combined LD matrix from multiple matrices
-create_combined_LD_matrix <- function(LD_matrices, variants) {
+create_LD_matrix <- function(LD_matrices, variants) {
   # Updated mergeVariants helper that checks the structure of each element.
   mergeVariants <- function(LD_variants_list) {
     mergedVariants <- character(0)
@@ -272,9 +272,9 @@ create_combined_LD_matrix <- function(LD_matrices, variants) {
 
   unique_variants <- mergeVariants(variants)
   # Initialize an empty combined LD matrix with the unique variants
-  combined_LD_matrix <- matrix(0, nrow = length(unique_variants), ncol = length(unique_variants))
-  rownames(combined_LD_matrix) <- unique_variants
-  colnames(combined_LD_matrix) <- unique_variants
+  LD_matrix <- matrix(0, nrow = length(unique_variants), ncol = length(unique_variants))
+  rownames(LD_matrix) <- unique_variants
+  colnames(LD_matrix) <- unique_variants
 
   # Function to align the values from each LD matrix to the combined matrix
   align_matrix <- function(ld_matrix, combined_matrix, variant_names) {
@@ -284,13 +284,13 @@ create_combined_LD_matrix <- function(LD_matrices, variants) {
   }
 
   # Use Map to pair each LD matrix with its rownames, then Reduce to fill the combined matrix.
-  combined_LD_matrix <- Reduce(
+  LD_matrix <- Reduce(
     function(x, y) align_matrix(y[[1]], x, y[[2]]),
     Map(list, LD_matrices, lapply(LD_matrices, rownames)),
-    combined_LD_matrix
+    LD_matrix
   )
 
-  return(combined_LD_matrix)
+  return(LD_matrix)
 }
 
 #' Load and Process Linkage Disequilibrium (LD) Matrix
@@ -315,8 +315,8 @@ create_combined_LD_matrix <- function(LD_matrices, variants) {
 #'
 #' @return A list with:
 #' \describe{
-#'   \item{combined_LD_variants}{Character vector of variant IDs (canonical format).}
-#'   \item{combined_LD_matrix}{Symmetric LD correlation matrix (or genotype matrix if return_genotype=TRUE).}
+#'   \item{LD_variants}{Character vector of variant IDs (canonical format).}
+#'   \item{LD_matrix}{Symmetric LD correlation matrix (or genotype matrix if return_genotype=TRUE).}
 #'   \item{ref_panel}{Data.frame with variant metadata (chrom, pos, A2, A1, variant_id,
 #'     and optionally allele_freq, variance, n_nomiss).}
 #'   \item{block_metadata}{Data.frame with block info (block_id, chrom, size, start_idx, end_idx).}
@@ -424,10 +424,10 @@ load_LD_from_genotype <- function(prefix, region, source_type,
   )
 
   if (return_genotype) {
-    # Note: combined_LD_matrix holds the genotype matrix X (not LD) when return_genotype=TRUE
+    # Note: LD_matrix holds the genotype matrix X (not LD) when return_genotype=TRUE
     return(list(
-      combined_LD_variants = variant_ids,
-      combined_LD_matrix = X,
+      LD_variants = variant_ids,
+      LD_matrix = X,
       ref_panel = ref_panel,
       block_metadata = block_metadata
     ))
@@ -437,8 +437,8 @@ load_LD_from_genotype <- function(prefix, region, source_type,
   R <- compute_LD(X, method = "sample")
 
   list(
-    combined_LD_variants = variant_ids,
-    combined_LD_matrix = R,
+    LD_variants = variant_ids,
+    LD_matrix = R,
     ref_panel = ref_panel,
     block_metadata = block_metadata
   )
@@ -476,41 +476,41 @@ load_LD_from_blocks <- function(LD_meta_file_path, region, extract_coordinates =
     }
   }
 
-  combined_LD_matrix <- create_combined_LD_matrix(
+  LD_matrix <- create_LD_matrix(
     LD_matrices = extracted_LD_matrices_list,
     variants = extracted_LD_variants_list
   )
-  combined_LD_variants <- rownames(combined_LD_matrix)
+  LD_variants <- rownames(LD_matrix)
 
   block_variants <- lapply(extracted_LD_variants_list, function(v) v$variants)
   block_metadata <- data.frame(
     block_id = seq_along(LD_file_paths),
     chrom = block_chroms,
     size = sapply(block_variants, length),
-    start_idx = sapply(block_variants, function(v) min(match(v, combined_LD_variants))),
-    end_idx = sapply(block_variants, function(v) max(match(v, combined_LD_variants))),
+    start_idx = sapply(block_variants, function(v) min(match(v, LD_variants))),
+    end_idx = sapply(block_variants, function(v) max(match(v, LD_variants))),
     stringsAsFactors = FALSE
   )
 
   rm(extracted_LD_matrices_list)
 
-  ref_panel <- parse_variant_id(rownames(combined_LD_matrix))
+  ref_panel <- parse_variant_id(rownames(LD_matrix))
   merged_variant_list <- do.call(rbind, extracted_LD_variants_list)
-  ref_panel$variant_id <- rownames(combined_LD_matrix)
+  ref_panel$variant_id <- rownames(LD_matrix)
 
   if ("allele_freq" %in% colnames(merged_variant_list)) {
-    ref_panel$allele_freq <- merged_variant_list$allele_freq[match(rownames(combined_LD_matrix), merged_variant_list$variants)]
+    ref_panel$allele_freq <- merged_variant_list$allele_freq[match(rownames(LD_matrix), merged_variant_list$variants)]
   }
   if ("variance" %in% colnames(merged_variant_list)) {
-    ref_panel$variance <- merged_variant_list$variance[match(rownames(combined_LD_matrix), merged_variant_list$variants)]
+    ref_panel$variance <- merged_variant_list$variance[match(rownames(LD_matrix), merged_variant_list$variants)]
   }
   if ("n_nomiss" %in% colnames(merged_variant_list)) {
-    ref_panel$n_nomiss <- merged_variant_list$n_nomiss[match(rownames(combined_LD_matrix), merged_variant_list$variants)]
+    ref_panel$n_nomiss <- merged_variant_list$n_nomiss[match(rownames(LD_matrix), merged_variant_list$variants)]
   }
 
   list(
-    combined_LD_variants = combined_LD_variants,
-    combined_LD_matrix = combined_LD_matrix,
+    LD_variants = LD_variants,
+    LD_matrix = LD_matrix,
     ref_panel = ref_panel,
     block_metadata = block_metadata
   )
@@ -590,8 +590,8 @@ filter_variants_by_ld_reference <- function(variant_ids, ld_reference_meta_file,
 #' into a list of smaller matrices based on the block_indices, making it easier to work with
 #' large LD matrices that span multiple blocks.
 #'
-#' @param ld_data A list as returned by load_LD_matrix, containing combined_LD_matrix,
-#'                combined_LD_variants, ref_panel, and block_metadata.
+#' @param ld_data A list as returned by load_LD_matrix, containing LD_matrix,
+#'                LD_variants, ref_panel, and block_metadata.
 #' @param merge_small_blocks Logical, whether to merge blocks smaller than min_merged_block_size (default: TRUE).
 #' @param min_merged_block_size Integer, minimum number of variants for a block after merging (default: 500).
 #' @param max_merged_block_size Integer, maximum number of variants in a block after merging (default: 10000).
@@ -606,9 +606,9 @@ filter_variants_by_ld_reference <- function(variant_ids, ld_reference_meta_file,
 partition_LD_matrix <- function(ld_data, merge_small_blocks = TRUE,
                                 min_merged_block_size = 500, max_merged_block_size = 10000) {
   # Extract components from ld_data
-  combined_matrix <- ld_data$combined_LD_matrix
+  combined_matrix <- ld_data$LD_matrix
   block_metadata <- ld_data$block_metadata
-  variant_ids <- ld_data$combined_LD_variants
+  variant_ids <- ld_data$LD_variants
 
   # Error if matrix is empty
   if (is.null(combined_matrix) || nrow(combined_matrix) == 0 || ncol(combined_matrix) == 0) {

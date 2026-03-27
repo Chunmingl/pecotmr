@@ -123,10 +123,10 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file,
   # load snp info once
   snp_info <- load_ld_snp_info(ld_meta_file_path, region_of_interest)
   # remove duplicate variants
-  dup_idx <- which(duplicated(LD_list$combined_LD_variants))
+  dup_idx <- which(duplicated(LD_list$LD_variants))
   if (length(dup_idx) >= 1) {
-    LD_list$combined_LD_variants <- LD_list$combined_LD_variants[-dup_idx]
-    LD_list$combined_LD_matrix <- LD_list$combined_LD_matrix[-dup_idx, -dup_idx]
+    LD_list$LD_variants <- LD_list$LD_variants[-dup_idx]
+    LD_list$LD_matrix <- LD_list$LD_matrix[-dup_idx, -dup_idx]
     LD_list$ref_panel <- LD_list$ref_panel[-dup_idx, ]
   }
 
@@ -151,7 +151,7 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file,
       for (study in names(gwas_files)) {
         gwas_file <- gwas_files[study]
         gwas_data_sumstats <- harmonize_gwas(gwas_file, query_region=query_region,   
-                                              LD_list$combined_LD_variants, c("beta", "z"),   
+                                              LD_list$LD_variants, c("beta", "z"),   
                                               match_min_prop = 0, column_file_path = column_file_path, comment_string = comment_string)
         if(is.null(gwas_data_sumstats)) next
         # loop through context within the context group:
@@ -161,7 +161,7 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file,
 
           # Step 4: harmonize weights, flip allele
           weights_matrix <- cbind(variant_id_to_df(rownames(weights_matrix)), weights_matrix)
-          weights_matrix_qced <- allele_qc(weights_matrix, LD_list$combined_LD_variants,
+          weights_matrix_qced <- allele_qc(weights_matrix, LD_list$LD_variants,
             colnames(weights_matrix)[!colnames(weights_matrix) %in% c("chrom", "pos", "A2", "A1")],
             match_min_prop = 0
           )
@@ -172,7 +172,7 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file,
           rownames(weights_matrix_subset) <- weights_matrix_qced$target_data_qced$variant_id # weight variant names are flipped/corrected
 
           # intersect post-qc gwas and post-qc weight variants (all now in canonical chr-prefix format)
-          gwas_LD_variants <- intersect(gwas_data_sumstats$variant_id, LD_list$combined_LD_variants)
+          gwas_LD_variants <- intersect(gwas_data_sumstats$variant_id, LD_list$LD_variants)
           weights_matrix_subset <- weights_matrix_subset[rownames(weights_matrix_subset) %in% gwas_data_sumstats$variant_id, , drop = FALSE]
           if (nrow(weights_matrix_subset) == 0) next
           postqc_weight_variants <- rownames(weights_matrix_subset)
@@ -192,11 +192,11 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file,
             results[[molecular_id]][["susie_weights_intermediate_qced"]][[context]] <- twas_weights_data[[molecular_id]]$susie_results[[context]][c("pip", "cs_variants", "cs_purity")]
             names(results[[molecular_id]][["susie_weights_intermediate_qced"]][[context]][["pip"]]) <- rownames(weights_matrix) # original variants that is not qced yet
             pip <- results[[molecular_id]][["susie_weights_intermediate_qced"]][[context]][["pip"]]
-            pip_qced <- allele_qc(cbind(parse_variant_id(names(pip)), pip), LD_list$combined_LD_variants, "pip", match_min_prop = 0)
+            pip_qced <- allele_qc(cbind(parse_variant_id(names(pip)), pip), LD_list$LD_variants, "pip", match_min_prop = 0)
             results[[molecular_id]][["susie_weights_intermediate_qced"]][[context]][["pip"]] <- abs(pip_qced$target_data_qced$pip)
             names(results[[molecular_id]][["susie_weights_intermediate_qced"]][[context]][["pip"]]) <- pip_qced$target_data_qced$variant_id
             results[[molecular_id]][["susie_weights_intermediate_qced"]][[context]][["cs_variants"]] <- lapply(results[[molecular_id]][["susie_weights_intermediate_qced"]][[context]][["cs_variants"]], function(x) {
-              variant_qc <- allele_qc(x, LD_list$combined_LD_variants, match_min_prop = 0)
+              variant_qc <- allele_qc(x, LD_list$LD_variants, match_min_prop = 0)
               variant_qc$target_data_qced$variant_id[variant_qc$target_data_qced$variant_id %in% postqc_weight_variants]
             })
           }
@@ -228,8 +228,8 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file,
       results[[molecular_id]] <- NULL
     } else {
       # All variant IDs are now in canonical chr-prefix format
-      var_indx <- match(all_molecular_variants, LD_list$combined_LD_variants)
-      results[[molecular_id]][["LD"]] <- as.matrix(LD_list$combined_LD_matrix[var_indx, var_indx])
+      var_indx <- match(all_molecular_variants, LD_list$LD_variants)
+      results[[molecular_id]][["LD"]] <- as.matrix(LD_list$LD_matrix[var_indx, var_indx])
     }
   }
   # return results

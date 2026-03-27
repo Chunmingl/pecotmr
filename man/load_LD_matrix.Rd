@@ -30,8 +30,8 @@ Only used for PLINK genotype sources.}
 \value{
 A list with:
 \describe{
-  \item{combined_LD_variants}{Character vector of variant IDs (canonical format).}
-  \item{combined_LD_matrix}{Symmetric LD correlation matrix (or genotype matrix if return_genotype=TRUE).}
+  \item{LD_variants}{Character vector of variant IDs (canonical format).}
+  \item{LD_matrix}{Symmetric LD correlation matrix (or genotype matrix if return_genotype=TRUE).}
   \item{ref_panel}{Data.frame with variant metadata (chrom, pos, A2, A1, variant_id,
     and optionally allele_freq, variance, n_nomiss).}
   \item{block_metadata}{Data.frame with block info (block_id, chrom, size, start_idx, end_idx).}

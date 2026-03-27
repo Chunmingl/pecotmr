@@ -118,9 +118,9 @@ extract_ld_for_variants <- function(ld_meta_file_path, analysis_region, variants
   chr <- str_split(analysis_region, ":", simplify = TRUE)[, 1]
   region_narrow <- paste0(chr, ":", min(var_pos), "-", max(var_pos))
   ld_data <- load_LD_matrix(ld_meta_file_path, region = region_narrow)
-  aligned <- align_variant_names(ld_data$combined_LD_variants, variants)
-  colnames(ld_data$combined_LD_matrix) <- rownames(ld_data$combined_LD_matrix) <- aligned$aligned_variants
-  ld_data$combined_LD_matrix[variants, variants]
+  aligned <- align_variant_names(ld_data$LD_variants, variants)
+  colnames(ld_data$LD_matrix) <- rownames(ld_data$LD_matrix) <- aligned$aligned_variants
+  ld_data$LD_matrix[variants, variants]
 }
 
 #' Function to calculate purity
