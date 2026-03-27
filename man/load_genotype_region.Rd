@@ -24,7 +24,7 @@ load_genotype_region(
 A numeric dosage matrix (rows=samples, cols=variants).
 }
 \description{
-Supports PLINK2 format (.pgen/.pvar/.psam, including .zst compressed) via plink2 CLI,
+Supports PLINK2 format (.pgen/.pvar[.zst]/.psam) via pgenlibr (no CLI needed),
 and PLINK1 format (.bed/.bim/.fam) via snpStats. PLINK2 format is preferred when available.
 }
 \details{

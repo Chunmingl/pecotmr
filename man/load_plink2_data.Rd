@@ -2,7 +2,7 @@
 % Please edit documentation in R/file_utils.R
 \name{load_plink2_data}
 \alias{load_plink2_data}
-\title{Load PLINK2 genotype data using plink2 CLI}
+\title{Load PLINK2 genotype data via pgenlibr}
 \usage{
 load_plink2_data(
   prefix,
@@ -12,8 +12,9 @@ load_plink2_data(
 )
 }
 \arguments{
-\item{prefix}{File prefix (without extension). Files should be at
-prefix.pgen[.zst], prefix.pvar[.zst], prefix.psam[.zst].}
+\item{prefix}{File prefix (without extension). Expected layout:
+prefix.pgen (uncompressed), prefix.pvar or prefix.pvar.zst,
+prefix.psam (uncompressed).}
 
 \item{region}{Target region in format "chr:start-end" (e.g., "chr1:1000-2000").
 If NULL, loads all variants.}
@@ -32,10 +33,10 @@ A list with:
     also includes alt_freq (A1 frequency) and obs_ct.}
 }
 \description{
-Loads genotype data from PLINK2 format files (.pgen/.pvar/.psam), including
-zstd-compressed versions (.pgen.zst/.pvar.zst/.psam.zst). The plink2 CLI
-reads all .zst files natively via the \code{vzs} modifier. Optionally
-extracts a genomic region and merges allele frequency information.
+Loads genotype data from PLINK2 format files using pgenlibr directly
+(no plink2 CLI required). Supports uncompressed .pgen with .pvar or
+.pvar.zst (the standard plink2 layout produced by \code{--make-pgen vzs}).
+The .psam file must be uncompressed (plink2 never compresses it).
 }
 \details{
 Dosage convention: X contains ALT/A1 (effect allele) dosage counts (0, 1, 2),
