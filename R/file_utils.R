@@ -100,7 +100,7 @@ load_plink2_data <- function(prefix, region = NULL, keep_indel = TRUE, keep_vari
   variant_idx <- seq_len(nrow(variant_info))
   if (!is.null(region)) {
     parsed <- parse_region(region)
-    in_region <- gsub("^chr", "", variant_info$chrom) == parsed$chrom &
+    in_region <- strip_chr_prefix(variant_info$chrom) == parsed$chrom &
                  variant_info$pos >= parsed$start &
                  variant_info$pos <= parsed$end
     variant_idx <- which(in_region)
@@ -131,10 +131,9 @@ load_plink2_data <- function(prefix, region = NULL, keep_indel = TRUE, keep_vari
 
   # --- Post-filters: indels and variant whitelist ---
   if (!keep_indel) {
-    is_snp <- nchar(variant_info$A2) == 1 & nchar(variant_info$A1) == 1 &
-              grepl("^[ATCG]$", variant_info$A2) & grepl("^[ATCG]$", variant_info$A1)
-    X <- X[, is_snp, drop = FALSE]
-    variant_info <- variant_info[is_snp, , drop = FALSE]
+    snp_mask <- is_snp_alleles(variant_info$A1, variant_info$A2)
+    X <- X[, snp_mask, drop = FALSE]
+    variant_info <- variant_info[snp_mask, , drop = FALSE]
   }
   if (!is.null(keep_variants_path)) {
     keep_idx <- match_variants_to_keep(variant_info, keep_variants_path)
@@ -200,7 +199,7 @@ match_variants_to_keep <- function(variant_info, keep_variants_path) {
   keep_variants <- parse_variant_id(
     if ("chrom" %in% names(keep_raw) & "pos" %in% names(keep_raw)) keep_raw else keep_raw[[1]]
   )
-  vi_chrom <- as.integer(gsub("^chr", "", variant_info$chrom))
+  vi_chrom <- as.integer(strip_chr_prefix(variant_info$chrom))
   paste0(vi_chrom, ":", variant_info$pos) %in% paste0(keep_variants$chrom, ":", keep_variants$pos)
 }
 
@@ -298,7 +297,7 @@ load_genotype_region <- function(genotype, region = NULL, keep_indel = TRUE, kee
     chr_prefix_present <- any(grepl("^chr", bim_sample$X1))
     bim_data <- vroom(paste0(genotype, ".bim"), col_names = FALSE, col_types = col_types)
     if (chr_prefix_present) {
-      bim_data$X1 <- gsub("^chr", "", bim_data$X1)
+      bim_data$X1 <- strip_chr_prefix(bim_data$X1)
     }
     snp_ids <- filter(bim_data, X1 == chrom & start <= X4 & X4 <= end) %>% pull(X2)
     if (length(snp_ids) == 0) {
@@ -310,9 +309,9 @@ load_genotype_region <- function(genotype, region = NULL, keep_indel = TRUE, kee
   geno <- snpStats::read.plink(genotype, select.snps = snp_ids)
 
   if (!keep_indel) {
-    is_indel <- with(geno$map, grepl("[^ATCG]", allele.1) | grepl("[^ATCG]", allele.2) | nchar(allele.1) > 1 | nchar(allele.2) > 1)
-    geno_bed <- geno$genotypes[, !is_indel]
-    geno_map <- geno$map[!is_indel, ]
+    snp_mask <- is_snp_alleles(geno$map$allele.1, geno$map$allele.2)
+    geno_bed <- geno$genotypes[, snp_mask]
+    geno_map <- geno$map[snp_mask, ]
   } else {
     geno_bed <- geno$genotypes
     geno_map <- geno$map
@@ -322,7 +321,7 @@ load_genotype_region <- function(genotype, region = NULL, keep_indel = TRUE, kee
     keep_variants <- parse_variant_id(
       if ("chrom" %in% names(keep_raw) & "pos" %in% names(keep_raw)) keep_raw else keep_raw[[1]]
     )
-    map_chrom <- as.integer(gsub("^chr", "", geno_map$chromosome))
+    map_chrom <- as.integer(strip_chr_prefix(geno_map$chromosome))
     keep_variants_index <- paste0(map_chrom, ":", geno_map$position) %in%
                            paste0(keep_variants$chrom, ":", keep_variants$pos)
     geno_bed <- geno_bed[, keep_variants_index]
@@ -1285,7 +1284,7 @@ load_tsv_region <- function(file_path, region = NULL, extract_region_name = NULL
 
   if (!is.null(region)) {
     if (grepl("^chr", region)) {
-      region <- sub("^chr", "", region)
+      region <- strip_chr_prefix(region)
     }
   }
 
@@ -1468,7 +1467,7 @@ load_ld_snp_info <- function(ld_meta_file_path, region_of_interest) {
     return(info_table)
   }), sapply(names(bim_data), function(x) {
     parts <- strsplit(basename(x), "[_:/.]")[[1]][1:3]
-    parts[1] <- sub("^chr", "", parts[1])
+    parts[1] <- strip_chr_prefix(parts[1])
     paste(parts, collapse = "_")
   }))
   return(snp_info)

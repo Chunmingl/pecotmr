@@ -582,7 +582,7 @@ load_multitrait_R_sumstat <- function(susie_fit, sumstats_db, coverage = NULL, e
     if (!all(c("#CHROM", "POS") %in% colnames(ref_table))) {
       stop("Filter file must contain columns: #CHROM, POS.")
     }
-    ref_chrom <- as.integer(sub("^chr", "", ref_table$`#CHROM`))
+    ref_chrom <- as.integer(strip_chr_prefix(ref_table$`#CHROM`))
     matched_indices <- which(variant_df$chrom %in% ref_chrom & variant_df$pos %in% ref_table$POS)
     if (!is.null(max_rows_selected) && max_rows_selected > 0 && max_rows_selected < length(matched_indices)) {
       selected_rows <- sample(length(matched_indices), max_rows_selected)

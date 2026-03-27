@@ -25,7 +25,7 @@ ctwas_bimfile_loader <- function(bim_file_path) {
 get_ctwas_meta_data <- function(ld_meta_data_file, subset_region_ids = NULL) {
   LD_info <- as.data.frame(vroom(ld_meta_data_file))
   colnames(LD_info)[1] <- "chrom"
-  LD_info$region_id <- paste(as.integer(sub("^chr", "", LD_info$chrom)), LD_info$start, LD_info$end, sep = "_")
+  LD_info$region_id <- paste(as.integer(strip_chr_prefix(LD_info$chrom)), LD_info$start, LD_info$end, sep = "_")
   LD_info$LD_file <- paste0(dirname(ld_meta_data_file), "/", gsub(",.*$", "", LD_info$path))
   LD_info$SNP_file <- paste0(LD_info$LD_file, ".bim")
   LD_info <- LD_info[, c("region_id", "LD_file", "SNP_file")]

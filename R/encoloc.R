@@ -152,7 +152,7 @@ load_and_extract_ld_matrix <- function(ld_meta_file_path, analysis_region, varia
 
     if (grepl("\\.txt$", ld_meta_file_path)) {
       geno_meta <- read_tsv(ld_meta_file_path, comment = "#", col_names = c("id", "path"), show_col_types = FALSE)
-      chr_num <- gsub("^chr", "", chr)
+      chr_num <- strip_chr_prefix(chr)
       geno_path <- geno_meta %>% filter(id == chr_num) %>% pull(path) %>% basename %>% paste0(dirname(ld_meta_file_path), "/", .)
 
       if (length(geno_path) != 1) stop("No matching entry found in metadata for chromosome ", chr)

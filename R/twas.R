@@ -753,7 +753,7 @@ twas_pipeline <- function(twas_weights_data,
     gene_table$molecular_id <- molecular_id
     return(gene_table)
   }))
-  twas_table$chr <- as.integer(gsub("chr", "", gsub("\\_.*", "", region_block)))
+  twas_table$chr <- as.integer(strip_chr_prefix(gsub("\\_.*", "", region_block)))
   twas_table$block <- region_block
 
   # Step 3. merge twas result table and twas input into twas_data to output

@@ -4,10 +4,7 @@
 #' @noRd
 order_dedup_regions <- function(df) {
   # Ensure that 'chrom' values are integers, df can be genomic_data or regions_of_interest
-  df$chrom <- ifelse(grepl("^chr", df$chrom),
-    as.integer(sub("^chr", "", df$chrom)), # Remove 'chr' and convert to integer
-    as.integer(df$chrom)
-  ) # Convert to integer if not already
+  df$chrom <- as.integer(strip_chr_prefix(df$chrom))
 
   # Remove duplicated rows based on 'chrom' and 'start' columns
   df <- distinct(df, chrom, start, .keep_all = TRUE) %>%
@@ -189,12 +186,12 @@ process_LD_matrix <- function(LD_file_path, bim_file_path) {
   if (ncol(LD_variants) == 9) {
     LD_variants <- LD_variants %>%
       setNames(c("chrom", "variants", "GD", "pos", "A1", "A2", "variance", "allele_freq", "n_nomiss")) %>%
-      mutate(chrom = as.character(as.integer(sub("^chr", "", chrom)))) %>%
+      mutate(chrom = as.character(as.integer(strip_chr_prefix(chrom)))) %>%
       mutate(variants = normalize_variant_id(variants))
   } else if (ncol(LD_variants) == 6) {
     LD_variants <- LD_variants %>%
       setNames(c("chrom", "variants", "GD", "pos", "A1", "A2")) %>%
-      mutate(chrom = as.character(as.integer(sub("^chr", "", chrom)))) %>%
+      mutate(chrom = as.character(as.integer(strip_chr_prefix(chrom)))) %>%
       mutate(variants = normalize_variant_id(variants))
   } else {
     stop("Unexpected number of columns in the input file.")
@@ -228,12 +225,11 @@ extract_LD_for_region <- function(LD_matrix, variants, region, extract_coordinat
   if (!is.null(extract_coordinates)) {
     # Preprocess 'extract_coordinate' to ensure 'chrom' is numeric and without 'chr'
     extract_coordinates <- extract_coordinates %>%
-      mutate(chrom = ifelse(grepl("^chr", chrom), as.integer(sub("^chr", "", chrom)), chrom)) %>%
+      mutate(chrom = as.integer(strip_chr_prefix(chrom))) %>%
       select(chrom, pos)
     # Now merge with 'LD_variants_region_selected'
     extracted_LD_variants <- extracted_LD_variants %>%
-      # Ensure that 'chrom' values in 'LD_variants_region_selected' are numeric, remove 'chr' if present
-      mutate(chrom = ifelse(grepl("^chr", chrom), as.integer(sub("^chr", "", chrom)), as.integer(chrom))) %>%
+      mutate(chrom = as.integer(strip_chr_prefix(chrom))) %>%
       # Merge with 'extract_coordinate' after 'chrom' adjustment
       merge(extract_coordinates, by = c("chrom", "pos"))
     # Select the desired columns, assuming 'variants' column is equivalent to the 'variants' in 'LD_variants_region_selected'
@@ -405,10 +401,7 @@ filter_variants_by_ld_reference <- function(variant_ids, ld_reference_meta_file,
     data.frame(chrom = x[1], pos = as.integer(x[2]), ref = x[3], alt = x[4])
   }))
 
-  variants_df$chrom <- ifelse(grepl("^chr", variants_df$chrom),
-    as.integer(sub("^chr", "", variants_df$chrom)), # Remove 'chr' and convert to integer
-    as.integer(variants_df$chrom)
-  )
+  variants_df$chrom <- as.integer(strip_chr_prefix(variants_df$chrom))
   # Step 2: Derive region information from the variants data frame
   region_df <- variants_df %>%
     group_by(chrom) %>%
@@ -426,8 +419,7 @@ filter_variants_by_ld_reference <- function(variant_ids, ld_reference_meta_file,
   # Step 5: Overlap the variants data frame with bim_data
   keep_indices <- which(paste(variants_df$chrom, variants_df$pos) %in% paste(bim_data$chrom, bim_data$pos))
   if (!keep_indel) {
-    valid_nucleotides <- c("A", "T", "C", "G")
-    snp_idx <- which((variants_df$ref %in% valid_nucleotides) & (variants_df$alt %in% valid_nucleotides))
+    snp_idx <- which(is_snp_alleles(variants_df$ref, variants_df$alt))
     keep_indices <- intersect(keep_indices, snp_idx)
   }
   variants_filtered <- variant_ids[keep_indices]

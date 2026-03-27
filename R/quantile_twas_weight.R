@@ -206,7 +206,7 @@ multicontext_ld_clumping <- function(X, qr_results, maf_list = NULL, ld_clump_r2
 
   # Parse SNP names to extract chromosome and position information
   parsed_snp_info <- do.call(rbind, strsplit(sig_SNPs_names, ":"))
-  chr <- as.numeric(gsub("^chr", "", parsed_snp_info[, 1]))
+  chr <- as.numeric(strip_chr_prefix(parsed_snp_info[, 1]))
   pos <- as.numeric(parsed_snp_info[, 2]) # Extract position
 
   # Step 1: Perform LD clumping for each tau based on p-values
