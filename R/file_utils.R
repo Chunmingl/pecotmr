@@ -90,10 +90,8 @@ load_plink2_data <- function(prefix, region = NULL, keep_indel = TRUE, keep_vari
 
   paths <- resolve_plink2_paths(prefix)
 
-  # --- Read variant info and determine region indices ---
-  pvar <- pgenlibr::NewPvar(paths$pvar)
-  on.exit(pgenlibr::ClosePvar(pvar), add = TRUE)
-  all_variant_info <- read_pvar_info(pvar)
+  # --- Read variant info from .pvar as text (pgenlibr::NewPvar is unreliable) ---
+  all_variant_info <- read_pvar_text(paths$pvar)
 
   variant_idx <- seq_len(nrow(all_variant_info))
   if (!is.null(region)) {
@@ -113,7 +111,7 @@ load_plink2_data <- function(prefix, region = NULL, keep_indel = TRUE, keep_vari
   colnames(psam)[1:2] <- c("FID", "IID")
 
   # --- Read genotype dosage via pgenlibr ---
-  pgen <- pgenlibr::NewPgen(paths$pgen, pvar = pvar)
+  pgen <- pgenlibr::NewPgen(paths$pgen)
   on.exit(pgenlibr::ClosePgen(pgen), add = TRUE)
   X <- pgenlibr::ReadList(pgen, variant_subset = variant_idx, meanimpute = FALSE)
   rownames(X) <- psam$IID
@@ -152,11 +150,11 @@ resolve_plink2_paths <- function(prefix) {
     stop("PLINK2 .pgen file not found at: ", pgen,
          "\n  Note: .pgen must be uncompressed (plink2 does not compress .pgen).")
   }
-  # pgenlibr::NewPvar handles both .pvar and .pvar.zst natively
-  pvar <- if (file.exists(paste0(prefix, ".pvar.zst"))) {
-    paste0(prefix, ".pvar.zst")
-  } else if (file.exists(paste0(prefix, ".pvar"))) {
+  # Prefer plain .pvar (fast, no extra deps); fall back to .pvar.zst
+  pvar <- if (file.exists(paste0(prefix, ".pvar"))) {
     paste0(prefix, ".pvar")
+  } else if (file.exists(paste0(prefix, ".pvar.zst"))) {
+    paste0(prefix, ".pvar.zst")
   } else {
     stop("PLINK2 .pvar[.zst] file not found at prefix: ", prefix)
   }
@@ -168,19 +166,36 @@ resolve_plink2_paths <- function(prefix) {
   list(pgen = pgen, pvar = pvar, psam = psam)
 }
 
-#' Build variant_info data.frame from a pgenlibr pvar object.
+#' Read .pvar or .pvar.zst as text into a data.frame.
+#'
+#' Note: pgenlibr::NewPvar is unreliable (empty error messages in v0.5.4-0.6.0
+#' due to an errbuf offset bug in the C++ wrapper). This text-based reader is
+#' used instead. It handles both plain text and zstd-compressed pvar files.
+#' Performance is comparable (~0.03s for 200K variants via vroom).
+#'
+#' For .pvar.zst without the archive R package, falls back to zstd CLI.
+#'
+#' @param pvar_path Path to .pvar or .pvar.zst file.
 #' @return data.frame with columns: chrom, id, pos, A2 (REF), A1 (ALT).
+#' @importFrom vroom vroom
 #' @noRd
-read_pvar_info <- function(pvar) {
-  n <- pgenlibr::GetVariantCt(pvar)
-  idx <- seq_len(n)
+read_pvar_text <- function(pvar_path) {
+  # For .zst files, decompress to temp if archive package unavailable
+  if (grepl("\\.zst$", pvar_path) && !requireNamespace("archive", quietly = TRUE)) {
+    tmp <- tempfile(fileext = ".pvar")
+    on.exit(unlink(tmp), add = TRUE)
+    ret <- system2("zstd", c("-dq", shQuote(pvar_path), "-o", shQuote(tmp)))
+    if (ret != 0) stop("Failed to decompress ", pvar_path, ". Install the 'archive' R package or 'zstd' CLI.")
+    pvar_path <- tmp
+  }
+  df <- as.data.frame(vroom(pvar_path, comment = "##", show_col_types = FALSE))
+  colnames(df)[1] <- "chrom"
   data.frame(
-    chrom = vapply(idx, function(i) pgenlibr::GetVariantChrom(pvar, i), character(1)),
-    id    = vapply(idx, function(i) pgenlibr::GetVariantId(pvar, i), character(1)),
-    pos   = vapply(idx, function(i) pgenlibr::GetVariantPos(pvar, i), integer(1)),
-    # PLINK2: allele 1 = REF (A2), allele 2 = first ALT (A1)
-    A2    = vapply(idx, function(i) pgenlibr::GetAlleleCode(pvar, i, 1L), character(1)),
-    A1    = vapply(idx, function(i) pgenlibr::GetAlleleCode(pvar, i, 2L), character(1)),
+    chrom = as.character(df$chrom),
+    id    = as.character(df$ID),
+    pos   = as.integer(df$POS),
+    A2    = as.character(df$REF),
+    A1    = as.character(df$ALT),
     stringsAsFactors = FALSE
   )
 }
@@ -211,9 +226,7 @@ get_ref_variant_info <- function(source, region = NULL) {
 
   if (resolved$type == "plink2") {
     paths <- resolve_plink2_paths(data_path)
-    pvar <- pgenlibr::NewPvar(paths$pvar)
-    on.exit(pgenlibr::ClosePvar(pvar), add = TRUE)
-    info <- read_pvar_info(pvar)
+    info <- read_pvar_text(paths$pvar)
     afreq <- read_afreq(data_path)
     if (!is.null(afreq)) {
       info$allele_freq <- afreq$alt_freq[match(info$id, afreq$id)]
