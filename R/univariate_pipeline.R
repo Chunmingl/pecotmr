@@ -150,12 +150,10 @@ univariate_analysis_pipeline <- function(
 #'
 #' @param sumstat_path File path to the summary statistics.
 #' @param column_file_path File path to the column mapping file.
-#' @param LD_data A list from load_LD_matrix containing LD_matrix (correlation R),
-#'   LD_variants, ref_panel, and block_metadata. Used for QC, imputation, and
-#'   fine-mapping when X_data is NULL.
-#' @param X_data Optional genotype matrix (samples x variants) for the z+X interface.
-#'   When provided, susie_rss uses X directly instead of computing from R.
-#'   QC and imputation still use R computed from X internally.
+#' @param LD_data A list from load_LD_matrix containing LD_matrix, LD_variants,
+#'   ref_panel, block_metadata, and is_genotype flag. When is_genotype=TRUE
+#'   (from return_genotype=TRUE), LD_matrix contains genotype X and susie_rss
+#'   uses the z+X interface. R is computed internally for QC/imputation.
 #' @param n_sample Sample size. If 0, retrieved from the sumstat file.
 #' @param n_case Number of cases (for case-control studies).
 #' @param n_control Number of controls (for case-control studies).
@@ -179,7 +177,7 @@ univariate_analysis_pipeline <- function(
 #' @importFrom magrittr %>%
 #' @export
 rss_analysis_pipeline <- function(
-    sumstat_path, column_file_path, LD_data, X_data = NULL,
+    sumstat_path, column_file_path, LD_data,
     n_sample = 0, n_case = 0, n_control = 0, region = NULL, skip_region = NULL,
     extract_region_name = NULL, region_name_col = NULL,
     qc_method = c("slalom", "dentist"),
@@ -192,7 +190,13 @@ rss_analysis_pipeline <- function(
     impute = TRUE, impute_opts = list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5, lamb = 0.01),
     pip_cutoff_to_skip = 0, stochastic_ld_sample = NULL,
     remove_indels = FALSE, comment_string = "#", diagnostics = FALSE) {
-  use_X <- !is.null(X_data)
+  use_X <- isTRUE(LD_data$is_genotype)
+  # When LD_data contains X (genotype), compute R for QC/imputation steps
+  if (use_X) {
+    X_data <- LD_data$LD_matrix
+    LD_data$LD_matrix <- compute_LD(X_data, method = "sample")
+    LD_data$is_genotype <- FALSE
+  }
   res <- list()
   rss_input <- load_rss_data(
     sumstat_path = sumstat_path, column_file_path = column_file_path,
@@ -253,7 +257,7 @@ rss_analysis_pipeline <- function(
     pri_coverage <- finemapping_opts$coverage[1]
     sec_coverage <- if (length(finemapping_opts$coverage) > 1) finemapping_opts$coverage[-1] else NULL
 
-    # Subset X to QCed variants if using X path
+    # When using X path, subset X to QCed/imputed variants
     X_mat_sub <- if (use_X) X_data[, sumstats$variant_id, drop = FALSE] else NULL
 
     res <- susie_rss_pipeline(sumstats,
