@@ -94,9 +94,9 @@ allele_qc <- function(target_data, ref_variants, col_to_flip = NULL,
   }
   ref_variants <- variant_id_to_df(ref_variants)
 
-  columns_to_remove <- c("chromosome", "position", "A2", "A1", "ref", "alt", "variant_id")
-
-  # Check if any of the specified columns are present
+  # Remove redundant columns that would conflict with the merge.
+  # Keep A2/A1 in target_data — they become A2.target/A1.target after merge.
+  columns_to_remove <- c("chromosome", "position", "ref", "alt", "variant_id")
   if (any(columns_to_remove %in% colnames(target_data))) {
 	 target_data <- select(target_data, -any_of(columns_to_remove))
   }
