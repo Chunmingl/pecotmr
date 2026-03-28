@@ -1339,7 +1339,8 @@ load_multitask_regional_data <- function(region, # a string of chr:start-end for
       LD_meta_file_path <- LD_meta_file_path_list[i_ld]
       LD_info <- load_LD_matrix(LD_meta_file_path,
         region = association_window,
-        extract_coordinates = extract_coordinates
+        extract_coordinates = extract_coordinates,
+        return_genotype = FALSE
       )
       # extract sumstat information
       conditions <- match_LD_sumstat[[i_ld]]
@@ -1347,7 +1348,7 @@ load_multitask_regional_data <- function(region, # a string of chr:start-end for
       sumstats <- lapply(pos, function(ii) {
         sumstat_path <- sumstat_path_list[ii]
         column_file_path <- column_file_path_list[ii]
-        # FIXME later: when consider multiple LD reference
+        # Load sumstat for this study (multiple LD references handled by outer loop)
         tmp <- load_rss_data(
           sumstat_path = sumstat_path, column_file_path = column_file_path,
           n_sample = n_samples[ii], n_case = n_cases[ii], n_control = n_controls[ii],

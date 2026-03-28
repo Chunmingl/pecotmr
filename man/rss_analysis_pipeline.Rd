@@ -23,7 +23,7 @@ rss_analysis_pipeline(
   impute_opts = list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5, lamb = 0.01),
   pip_cutoff_to_skip = 0,
   stochastic_ld_sample = NULL,
-  remove_indels = FALSE,
+  keep_indel = TRUE,
   comment_string = "#",
   diagnostics = FALSE
 )
@@ -67,7 +67,7 @@ signal_cutoff, min_abs_corr).}
 
 \item{stochastic_ld_sample}{Passed to susie_rss. NULL (default), TRUE, or integer.}
 
-\item{remove_indels}{Whether to remove indel variants (default FALSE).}
+\item{keep_indel}{Whether to keep indel variants (default TRUE).}
 
 \item{comment_string}{Comment character for sumstat file (default "#").}
 

@@ -13,7 +13,7 @@ colocboost_analysis_pipeline(
   separate_gwas = FALSE,
   maf_cutoff = 5e-04,
   pip_cutoff_to_skip_ind = 0,
-  remove_indels = FALSE,
+  keep_indel = TRUE,
   pip_cutoff_to_skip_sumstat = 0,
   qc_method = c("slalom", "dentist"),
   impute = TRUE,

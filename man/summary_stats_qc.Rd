@@ -4,13 +4,7 @@
 \alias{summary_stats_qc}
 \title{Perform Quality Control on Summary Statistics}
 \usage{
-summary_stats_qc(
-  sumstats,
-  LD_data,
-  n = NULL,
-  var_y = NULL,
-  method = c("slalom", "dentist")
-)
+summary_stats_qc(sumstats, LD_data, n = NULL, method = c("slalom", "dentist"))
 }
 \arguments{
 \item{sumstats}{A data frame containing the processed summary statistics.}

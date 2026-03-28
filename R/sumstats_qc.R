@@ -18,7 +18,7 @@
 #' @importFrom tidyr separate
 #' @importFrom magrittr %>%
 #' @export
-rss_basic_qc <- function(sumstats, LD_data, skip_region = NULL, remove_indels = FALSE) {
+rss_basic_qc <- function(sumstats, LD_data, skip_region = NULL, keep_indel = TRUE) {
   # Check if required columns are present in sumstats
   required_cols <- c("chrom", "pos", "A1", "A2")
   missing_cols <- setdiff(required_cols, colnames(sumstats))
@@ -30,7 +30,7 @@ rss_basic_qc <- function(sumstats, LD_data, skip_region = NULL, remove_indels = 
 
   allele_flip <- allele_qc(sumstats, ref_variants,
     col_to_flip = c("beta", "z"),
-    match_min_prop = 0, remove_dups = TRUE, remove_indels = remove_indels,
+    match_min_prop = 0, remove_dups = TRUE, remove_indels = !keep_indel,
     remove_strand_ambiguous = TRUE
   )
 
@@ -106,7 +106,7 @@ rss_basic_qc <- function(sumstats, LD_data, skip_region = NULL, remove_indels = 
 #' qc_results <- summary_stats_qc(sumstats, LD_data, method = "slalom")
 #'
 #' @export
-summary_stats_qc <- function(sumstats, LD_data, n = NULL, var_y = NULL, method = c("slalom", "dentist")) {
+summary_stats_qc <- function(sumstats, LD_data, n = NULL, method = c("slalom", "dentist")) {
   # assuming sumstats has been allele QC-ed, using rss_basic_qc() function
   LD_extract <- LD_data$LD_matrix[sumstats$variant_id, sumstats$variant_id, drop = FALSE]
   if (method == "dentist") {

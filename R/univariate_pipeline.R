@@ -169,7 +169,7 @@ univariate_analysis_pipeline <- function(
 #' @param impute_opts List of imputation options (rcond, R2_threshold, minimum_ld, lamb).
 #' @param pip_cutoff_to_skip PIP threshold for early stopping (default 0, no skip).
 #' @param stochastic_ld_sample Passed to susie_rss. NULL (default), TRUE, or integer.
-#' @param remove_indels Whether to remove indel variants (default FALSE).
+#' @param keep_indel Whether to keep indel variants (default TRUE).
 #' @param comment_string Comment character for sumstat file (default "#").
 #' @param diagnostics Whether to include diagnostic info (default FALSE).
 #'
@@ -189,7 +189,7 @@ rss_analysis_pipeline <- function(
     ),
     impute = TRUE, impute_opts = list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5, lamb = 0.01),
     pip_cutoff_to_skip = 0, stochastic_ld_sample = NULL,
-    remove_indels = FALSE, comment_string = "#", diagnostics = FALSE) {
+    keep_indel = TRUE, comment_string = "#", diagnostics = FALSE) {
   use_X <- isTRUE(LD_data$is_genotype)
   # When LD_data contains X (genotype), compute R for QC/imputation steps
   if (use_X) {
@@ -215,7 +215,7 @@ rss_analysis_pipeline <- function(
 
   # Preprocess: QC and imputation require LD_data with correlation matrix R.
   # When using X path, compute R from X for QC/imputation, then pass X to susie_rss.
-  preprocess_results <- rss_basic_qc(sumstats, LD_data, skip_region = skip_region, remove_indels = remove_indels)
+  preprocess_results <- rss_basic_qc(sumstats, LD_data, skip_region = skip_region, keep_indel = keep_indel)
   sumstats <- preprocess_results$sumstats
   LD_mat <- preprocess_results$LD_mat
 

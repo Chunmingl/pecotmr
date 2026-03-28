@@ -117,9 +117,9 @@ test_that("rss_basic_qc with skip_region preserves non-skipped variants", {
   expect_true(300 %in% remaining_pos)
 })
 
-test_that("rss_basic_qc with remove_indels=TRUE removes indel variants", {
+test_that("rss_basic_qc with keep_indel=FALSE removes indel variants", {
   td <- make_test_sumstats_ld(n_variants = 5, with_indels = TRUE)
-  result <- rss_basic_qc(td$sumstats, td$LD_data, remove_indels = TRUE)
+  result <- rss_basic_qc(td$sumstats, td$LD_data, keep_indel = FALSE)
   expect_type(result, "list")
   expect_lte(nrow(result$sumstats), nrow(td$sumstats))
 })

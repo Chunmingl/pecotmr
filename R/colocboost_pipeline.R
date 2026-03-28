@@ -37,7 +37,7 @@ colocboost_analysis_pipeline <- function(region_data,
                                          maf_cutoff = 0.0005,
                                          pip_cutoff_to_skip_ind = 0,
                                          # - sumstat QC
-                                         remove_indels = FALSE,
+                                         keep_indel = TRUE,
                                          pip_cutoff_to_skip_sumstat = 0,
                                          qc_method = c("slalom", "dentist"),
                                          impute = TRUE,
@@ -203,7 +203,7 @@ colocboost_analysis_pipeline <- function(region_data,
   region_data <- qc_regional_data(region_data,
     maf_cutoff = maf_cutoff,
     pip_cutoff_to_skip_ind = pip_cutoff_to_skip_ind,
-    remove_indels = remove_indels,
+    keep_indel = keep_indel,
     pip_cutoff_to_skip_sumstat = pip_cutoff_to_skip_sumstat,
     qc_method = qc_method,
     impute = impute,
@@ -453,7 +453,7 @@ qc_regional_data <- function(region_data,
                              maf_cutoff = 0.0005,
                              pip_cutoff_to_skip_ind = 0,
                              # - sumstat
-                             remove_indels = FALSE,
+                             keep_indel = TRUE,
                              pip_cutoff_to_skip_sumstat = 0,
                              qc_method = c("slalom", "dentist"),
                              impute = TRUE,
@@ -600,7 +600,7 @@ qc_regional_data <- function(region_data,
   #   \item LD_match: A vector of strings to indicating sumstats and LD matching (save space since multiple sumstats may link to the same LD matrix).
   # }
   summary_stats_qc_multitask <- function(sumstat_data,
-                                         remove_indels = FALSE,
+                                         keep_indel = TRUE,
                                          pip_cutoff_to_skip_sumstat = 0,
                                          qc_method = c("slalom", "dentist"),
                                          impute = TRUE,
@@ -630,13 +630,13 @@ qc_regional_data <- function(region_data,
         }
 
         # Preprocess the input data
-        preprocess_results <- rss_basic_qc(sumstat$sumstats, LD_data, remove_indels = remove_indels)
+        preprocess_results <- rss_basic_qc(sumstat$sumstats, LD_data, keep_indel = keep_indel)
         sumstat$sumstats <- preprocess_results$sumstats
         LD_mat <- preprocess_results$LD_mat
 
         # initial PIP checking
         if (pip_cutoff_to_skip_ld != 0) {
-          pip <- susie_rss_wrapper(z = sumstat$sumstats$z, R = LD_mat, L = 1, n = n, var_y = var_y)$pip
+          pip <- susie_rss_wrapper(z = sumstat$sumstats$z, R = LD_mat, L = 1, n = n)$pip
           if (pip_cutoff_to_skip_ld < 0) {
             # automatically determine the cutoff to use
             pip_cutoff_to_skip_ld <- 3 * 1 / nrow(LD_mat)
@@ -654,7 +654,7 @@ qc_regional_data <- function(region_data,
 
         # Perform quality control - remove
         if (!is.null(qc_method)) {
-          qc_results <- summary_stats_qc(sumstat$sumstats, LD_data, n = n, var_y = var_y, method = qc_method)
+          qc_results <- summary_stats_qc(sumstat$sumstats, LD_data, n = n, method = qc_method)
           sumstat$sumstats <- qc_results$sumstats
           LD_mat <- qc_results$LD_mat
         }
@@ -697,7 +697,7 @@ qc_regional_data <- function(region_data,
   if (!is.null(sumstat_data)) {
     # - initial check PIP, qc or impute
     sumstat_data <- summary_stats_qc_multitask(sumstat_data,
-      remove_indels = remove_indels,
+      keep_indel = keep_indel,
       pip_cutoff_to_skip_sumstat = pip_cutoff_to_skip_sumstat,
       qc_method = qc_method,
       impute = impute, impute_opts = impute_opts
