@@ -22,7 +22,8 @@ quantile_twas_weight_pipeline(
   keep_variants = NULL,
   marginal_beta_calculate = TRUE,
   twas_weight_calculate = TRUE,
-  qrank_screen_calculate = TRUE
+  qrank_screen_calculate = TRUE,
+  vqtl_calculate = TRUE
 )
 }
 \arguments{
