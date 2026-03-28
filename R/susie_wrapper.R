@@ -244,8 +244,15 @@ susie_rss_pipeline <- function(sumstats, LD_mat = NULL, X_mat = NULL, n = NULL,
     res <- do.call(susie_rss_wrapper, c(common, list(L = L, max_L = max_L, l_step = l_step)))
   }
 
-  # For post-processing, need a square matrix (R or computed from X)
-  data_x <- if (!is.null(LD_mat)) LD_mat else compute_LD(X_mat[, seq_along(z)], method = "sample")
+  # For post-processing, need a square matrix (R or computed from X).
+  # For mixture panels (list of X), use the first panel to compute R.
+  if (!is.null(LD_mat)) {
+    data_x <- LD_mat
+  } else if (is.list(X_mat) && !is.matrix(X_mat)) {
+    data_x <- compute_LD(X_mat[[1]][, seq_along(z), drop = FALSE], method = "sample")
+  } else {
+    data_x <- compute_LD(X_mat[, seq_along(z), drop = FALSE], method = "sample")
+  }
 
   res <- susie_post_processor(res,
     data_x = data_x, data_y = list(z = z),

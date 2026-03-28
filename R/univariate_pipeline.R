@@ -143,6 +143,29 @@ univariate_analysis_pipeline <- function(
   return(res)
 }
 
+#' Load LD for a study, supporting single or mixture panels.
+#'
+#' @param ld_path A single LD metadata TSV path, or comma-separated paths for
+#'   mixture panels (e.g., "ld_EUR.tsv,ld_AFR.tsv").
+#' @param region Region string "chr:start-end".
+#' @return An LD_data list from load_LD_matrix. For single panels, returns as-is.
+#'   For mixture panels, LD_matrix is a list of X matrices (one per panel).
+#' @export
+load_study_LD <- function(ld_path, region) {
+  paths <- strsplit(ld_path, ",")[[1]]
+  if (length(paths) == 1) {
+    return(load_LD_matrix(paths, region, return_genotype = "auto"))
+  }
+  # Mixture: load each panel as genotype X
+  base <- load_LD_matrix(paths[1], region, return_genotype = TRUE)
+  X_list <- c(
+    list(base$LD_matrix),
+    lapply(paths[-1], function(p) load_LD_matrix(p, region, return_genotype = TRUE)$LD_matrix)
+  )
+  base$LD_matrix <- X_list
+  base
+}
+
 #' RSS Analysis Pipeline
 #'
 #' End-to-end pipeline for summary statistics fine-mapping via SuSiE RSS.
@@ -190,11 +213,15 @@ rss_analysis_pipeline <- function(
     impute = TRUE, impute_opts = list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5, lamb = 0.01),
     pip_cutoff_to_skip = 0, stochastic_ld_sample = NULL,
     keep_indel = TRUE, comment_string = "#", diagnostics = FALSE) {
-  use_X <- isTRUE(LD_data$is_genotype)
-  # When LD_data contains X (genotype), compute R for QC/imputation steps
+  # Detect genotype input: single X matrix or list of X matrices (mixture panel).
+  # susie_rss accepts X=list(X1, X2, ...) for multi-panel mixture.
+  is_X_list <- is.list(LD_data$LD_matrix) && !is.matrix(LD_data$LD_matrix)
+  use_X <- isTRUE(LD_data$is_genotype) || is_X_list
   if (use_X) {
     X_data <- LD_data$LD_matrix
-    LD_data$LD_matrix <- compute_LD(X_data, method = "sample")
+    # Compute R from first panel (or single panel) for QC/imputation
+    X_for_R <- if (is_X_list) X_data[[1]] else X_data
+    LD_data$LD_matrix <- compute_LD(X_for_R, method = "sample")
     LD_data$is_genotype <- FALSE
   }
   res <- list()
@@ -257,8 +284,17 @@ rss_analysis_pipeline <- function(
     pri_coverage <- finemapping_opts$coverage[1]
     sec_coverage <- if (length(finemapping_opts$coverage) > 1) finemapping_opts$coverage[-1] else NULL
 
-    # When using X path, subset X to QCed/imputed variants
-    X_mat_sub <- if (use_X) X_data[, sumstats$variant_id, drop = FALSE] else NULL
+    # When using X path, subset X to QCed/imputed variants.
+    # For mixture panels (list), subset each panel; susie_rss accepts X=list().
+    if (use_X) {
+      if (is_X_list) {
+        X_mat_sub <- lapply(X_data, function(Xk) Xk[, sumstats$variant_id, drop = FALSE])
+      } else {
+        X_mat_sub <- X_data[, sumstats$variant_id, drop = FALSE]
+      }
+    } else {
+      X_mat_sub <- NULL
+    }
 
     res <- susie_rss_pipeline(sumstats,
       LD_mat = if (use_X) NULL else LD_mat,
