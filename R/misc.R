@@ -197,14 +197,16 @@ compute_LD <- function(X, method = c("sample", "population"),
 
   if (method == "sample") {
     # ---- Standard sample correlation (N-1 denominator) ----
-    # Mean impute missing values
-    X_imp <- apply(X, 2, function(x) {
-      nas <- is.na(x)
-      if (any(nas)) x[nas] <- mean(x, na.rm = TRUE)
-      x
-    })
+    # Mean impute only if NAs exist (PLINK2 data typically has none)
+    X_imp <- X
+    if (anyNA(X_imp)) {
+      col_means <- colMeans(X_imp, na.rm = TRUE)
+      na_pos <- which(is.na(X_imp), arr.ind = TRUE)
+      X_imp[na_pos] <- col_means[na_pos[, 2]]
+    }
     if (requireNamespace("Rfast", quietly = TRUE)) {
-      R <- Rfast::cora(X_imp, large = TRUE)
+      # large=FALSE uses tcrossprod internally, ~40x faster than large=TRUE
+      R <- Rfast::cora(X_imp, large = FALSE)
     } else {
       R <- cor(X_imp)
     }
