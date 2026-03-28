@@ -823,34 +823,38 @@ quantile_twas_weight_pipeline <- function(X, Y, Z = NULL, maf = NULL, region_id 
                                           keep_variants = NULL,
                                           marginal_beta_calculate = TRUE,
                                           twas_weight_calculate = TRUE,
-                                          qrank_screen_calculate = TRUE) {
-  # Step 1: vQTL
-  # Step 1-1: Calculate vQTL rank scores
-  message("Step 0: Calculating vQTL rank scores for region ", region_id)
-  num_tau_levels <- length(quantile_qtl_tau_list) # Convert tau.list to numeric count
-  rank_score <- QUAIL_rank_score_pipeline(
-    phenotype = Y,
-    covariates = Z,
-    num_tau_levels = num_tau_levels,
-    method = "equal",
-    num_cores = 1
-  )
-  message("vQTL rank scores calculated.")
-
-  # Step 1-2: Run vQTL pipeline
-  message("Step 0.5: Running vQTL analysis for rank scores in region ", region_id)
-  vqtl_results <- QUAIL_pipeline(
-    genotype = X,
-    rank_score = rank_score,
-    covariates = Z,
-    phenotype_id = colnames(Y)[1]
-  )
-  message("vQTL analysis completed. Proceeding to QR screen.")
-
+                                          qrank_screen_calculate = TRUE,
+                                          vqtl_calculate = TRUE) {
   # Initialize results list
-  results <- list(
-    vqtl_results = vqtl_results
-  )
+  results <- list()
+
+  # Step 1: vQTL (optional)
+  if (vqtl_calculate) {
+    # Step 1-1: Calculate vQTL rank scores
+    message("Step 0: Calculating vQTL rank scores for region ", region_id)
+    num_tau_levels <- length(quantile_qtl_tau_list) # Convert tau.list to numeric count
+    rank_score <- QUAIL_rank_score_pipeline(
+      phenotype = Y,
+      covariates = Z,
+      num_tau_levels = num_tau_levels,
+      method = "equal",
+      num_cores = 1
+    )
+    message("vQTL rank scores calculated.")
+
+    # Step 1-2: Run vQTL pipeline
+    message("Step 0.5: Running vQTL analysis for rank scores in region ", region_id)
+    vqtl_results <- QUAIL_pipeline(
+      genotype = X,
+      rank_score = rank_score,
+      covariates = Z,
+      phenotype_id = colnames(Y)[1]
+    )
+    message("vQTL analysis completed.")
+    results$vqtl_results <- vqtl_results
+  } else {
+    message("Skipping vQTL calculation.")
+  }
 
   if (qrank_screen_calculate) {
     # Step 2: QR screen
