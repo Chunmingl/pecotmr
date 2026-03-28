@@ -20,8 +20,10 @@ load_LD_matrix(
 \item{extract_coordinates}{Optional data.frame with columns "chrom" and "pos" for
 specific coordinates extraction (only for pre-computed LD blocks).}
 
-\item{return_genotype}{If TRUE, return the genotype matrix X instead of the LD
-correlation matrix R. Only valid for PLINK genotype sources.}
+\item{return_genotype}{Controls what LD_matrix contains in the return value.
+FALSE (default): always return correlation matrix R.
+TRUE: return genotype matrix X (only valid for PLINK sources).
+"auto": return X for PLINK sources, R for pre-computed sources.}
 
 \item{n_sample}{Optional sample size for computing variance (= 2*p*(1-p)*n/(n-1)).
 If NULL, ref_panel will not include variance or n_nomiss columns.

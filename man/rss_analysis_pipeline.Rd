@@ -8,7 +8,6 @@ rss_analysis_pipeline(
   sumstat_path,
   column_file_path,
   LD_data,
-  X_data = NULL,
   n_sample = 0,
   n_case = 0,
   n_control = 0,
@@ -34,13 +33,10 @@ rss_analysis_pipeline(
 
 \item{column_file_path}{File path to the column mapping file.}
 
-\item{LD_data}{A list from load_LD_matrix containing LD_matrix (correlation R),
-LD_variants, ref_panel, and block_metadata. Used for QC, imputation, and
-fine-mapping when X_data is NULL.}
-
-\item{X_data}{Optional genotype matrix (samples x variants) for the z+X interface.
-When provided, susie_rss uses X directly instead of computing from R.
-QC and imputation still use R computed from X internally.}
+\item{LD_data}{A list from load_LD_matrix containing LD_matrix, LD_variants,
+ref_panel, block_metadata, and is_genotype flag. When is_genotype=TRUE
+(from return_genotype=TRUE), LD_matrix contains genotype X and susie_rss
+uses the z+X interface. R is computed internally for QC/imputation.}
 
 \item{n_sample}{Sample size. If 0, retrieved from the sumstat file.}
 

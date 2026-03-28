@@ -236,8 +236,10 @@ create_LD_matrix <- function(LD_matrices, variants) {
 #' @param region Region of interest: "chr:start-end" string or data.frame with chrom/start/end.
 #' @param extract_coordinates Optional data.frame with columns "chrom" and "pos" for
 #'   specific coordinates extraction (only for pre-computed LD blocks).
-#' @param return_genotype If TRUE, return the genotype matrix X instead of the LD
-#'   correlation matrix R. Only valid for PLINK genotype sources.
+#' @param return_genotype Controls what LD_matrix contains in the return value.
+#'   FALSE (default): always return correlation matrix R.
+#'   TRUE: return genotype matrix X (only valid for PLINK sources).
+#'   "auto": return X for PLINK sources, R for pre-computed sources.
 #' @param n_sample Optional sample size for computing variance (= 2*p*(1-p)*n/(n-1)).
 #'   If NULL, ref_panel will not include variance or n_nomiss columns.
 #'   Only used for PLINK genotype sources.
@@ -254,14 +256,13 @@ create_LD_matrix <- function(LD_matrices, variants) {
 load_LD_matrix <- function(LD_meta_file_path, region, extract_coordinates = NULL,
                            return_genotype = FALSE, n_sample = NULL) {
   source <- resolve_ld_source(LD_meta_file_path)
+  is_plink <- source$type %in% c("plink2", "plink1")
 
-  if (source$type %in% c("plink2", "plink1")) {
-    # For PLINK via metadata TSV, resolve per-chromosome prefix
-    prefix <- if (!is.null(source$meta_path)) {
-      resolve_plink_prefix_for_region(source$meta_path, region, source$type)
-    } else {
-      source$data_path
-    }
+  # "auto": return X for PLINK, R for pre-computed
+  if (identical(return_genotype, "auto")) return_genotype <- is_plink
+
+  if (is_plink) {
+    prefix <- resolve_plink_prefix_for_region(source$meta_path, region, source$type)
     return(load_LD_from_genotype(prefix, region, source$type,
                                  return_genotype = return_genotype,
                                  n_sample = n_sample))
