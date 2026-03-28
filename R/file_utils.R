@@ -88,41 +88,38 @@ load_plink2_data <- function(prefix, region = NULL, keep_indel = TRUE, keep_vari
     stop("pgenlibr is required. Install from https://cran.r-project.org/web/packages/pgenlibr/index.html")
   }
 
-  # --- Resolve and validate file paths ---
   paths <- resolve_plink2_paths(prefix)
 
-  # --- Read variant info via pgenlibr ---
+  # --- Read variant info and determine region indices ---
   pvar <- pgenlibr::NewPvar(paths$pvar)
   on.exit(pgenlibr::ClosePvar(pvar), add = TRUE)
-  variant_info <- read_pvar_info(pvar)
+  all_variant_info <- read_pvar_info(pvar)
 
-  # --- Region filter: select variant indices to load ---
-  variant_idx <- seq_len(nrow(variant_info))
+  variant_idx <- seq_len(nrow(all_variant_info))
   if (!is.null(region)) {
     parsed <- parse_region(region)
-    in_region <- strip_chr_prefix(variant_info$chrom) == parsed$chrom &
-                 variant_info$pos >= parsed$start &
-                 variant_info$pos <= parsed$end
+    in_region <- strip_chr_prefix(all_variant_info$chrom) == parsed$chrom &
+                 all_variant_info$pos >= parsed$start &
+                 all_variant_info$pos <= parsed$end
     variant_idx <- which(in_region)
     if (length(variant_idx) == 0) {
       stop(NoSNPsError(paste("No variants found in region", region)))
     }
-    variant_info <- variant_info[variant_idx, , drop = FALSE]
   }
+  variant_info <- all_variant_info[variant_idx, , drop = FALSE]
 
   # --- Read samples from .psam ---
   psam <- as.data.frame(vroom(paths$psam, delim = "\t", show_col_types = FALSE))
   colnames(psam)[1:2] <- c("FID", "IID")
 
   # --- Read genotype dosage via pgenlibr ---
-  # ReadList returns ALT (A1) dosage [0, 1, 2], consistent with PLINK1 path
   pgen <- pgenlibr::NewPgen(paths$pgen, pvar = pvar)
   on.exit(pgenlibr::ClosePgen(pgen), add = TRUE)
   X <- pgenlibr::ReadList(pgen, variant_subset = variant_idx, meanimpute = FALSE)
   rownames(X) <- psam$IID
   colnames(X) <- variant_info$id
 
-  # --- Merge allele frequency if .afreq[.zst] exists ---
+  # --- Attach allele frequency from .afreq if available ---
   afreq <- read_afreq(prefix)
   if (!is.null(afreq)) {
     variant_info <- merge(variant_info, afreq[, c("id", "alt_freq", "obs_ct")],
@@ -141,7 +138,7 @@ load_plink2_data <- function(prefix, region = NULL, keep_indel = TRUE, keep_vari
     variant_info <- variant_info[keep_idx, , drop = FALSE]
   }
 
-  return(list(X = X, variant_info = variant_info))
+  list(X = X, variant_info = variant_info)
 }
 
 # ---------- Internal helpers for load_plink2_data ----------
@@ -186,6 +183,78 @@ read_pvar_info <- function(pvar) {
     A1    = vapply(idx, function(i) pgenlibr::GetAlleleCode(pvar, i, 2L), character(1)),
     stringsAsFactors = FALSE
   )
+}
+
+#' Get variant information from any LD reference source without loading genotypes.
+#'
+#' Auto-detects the source type (PLINK2, PLINK1, or pre-computed LD metadata)
+#' and returns variant metadata. For PLINK2, opens only the .pvar file.
+#' For PLINK1, reads only the .bim file. No genotype data is loaded.
+#'
+#' @param source PLINK prefix or LD metadata file path.
+#' @param region Region of interest: "chr:start-end" string or data.frame with
+#'   chrom/start/end. If NULL, returns all variants.
+#' @return A data.frame with columns: chrom, id, pos, A2, A1.
+#'   May also include allele_freq, variance, n_nomiss depending on source.
+#'
+#' @importFrom vroom vroom
+#' @export
+get_ref_variant_info <- function(source, region = NULL) {
+  source_type <- detect_ld_source_type(source)
+
+  if (source_type == "plink2") {
+    paths <- resolve_plink2_paths(source)
+    pvar <- pgenlibr::NewPvar(paths$pvar)
+    on.exit(pgenlibr::ClosePvar(pvar), add = TRUE)
+    info <- read_pvar_info(pvar)
+    # Attach allele frequency from .afreq if available
+    afreq <- read_afreq(source)
+    if (!is.null(afreq)) {
+      info$allele_freq <- afreq$alt_freq[match(info$id, afreq$id)]
+    }
+  } else if (source_type == "plink1") {
+    bim <- read_bim(paste0(source, ".bed"))
+    info <- data.frame(
+      chrom = bim$chrom, id = bim$id, pos = bim$pos,
+      A2 = bim$a0, A1 = bim$a1,
+      stringsAsFactors = FALSE
+    )
+  } else {
+    # Pre-computed LD: read bim files via metadata
+    bim_paths <- get_regional_ld_meta(source, region)$intersections$bim_file_paths
+    info <- do.call(rbind, lapply(bim_paths, function(path) {
+      df <- as.data.frame(vroom(path, col_names = FALSE, show_col_types = FALSE))
+      out <- data.frame(
+        chrom = df$X1, id = df$X2, pos = df$X4,
+        A2 = df$X5, A1 = df$X6,
+        stringsAsFactors = FALSE
+      )
+      if (ncol(df) >= 8) { out$variance <- df$X7; out$allele_freq <- df$X8 }
+      if (ncol(df) >= 9) { out$n_nomiss <- df$X9 }
+      out
+    }))
+    info$id <- normalize_variant_id(info$id)
+    return(info)  # Already region-filtered by get_regional_ld_meta
+  }
+
+  # Region filter for plink2/plink1
+  if (!is.null(region)) {
+    parsed <- parse_region(region)
+    info_chrom <- strip_chr_prefix(info$chrom)
+    # Handle multi-row region data.frame (one row per chrom)
+    if (is.data.frame(parsed) && nrow(parsed) > 1) {
+      in_region <- rep(FALSE, nrow(info))
+      for (r in seq_len(nrow(parsed))) {
+        in_region <- in_region | (info_chrom == as.character(parsed$chrom[r]) &
+                                  info$pos >= parsed$start[r] & info$pos <= parsed$end[r])
+      }
+    } else {
+      in_region <- info_chrom == as.character(parsed$chrom) &
+                   info$pos >= parsed$start & info$pos <= parsed$end
+    }
+    info <- info[in_region, , drop = FALSE]
+  }
+  info
 }
 
 #' Match variant_info against a whitelist file, returning logical index.
@@ -1473,30 +1542,3 @@ get_filter_lbf_index <- function(susie_obj, coverage = 0.5, size_factor = 0.5) {
   return(cs_index)
 }
 
-#' Function to load LD reference data variants
-#' @export
-#' @noRd
-load_ld_snp_info <- function(ld_meta_file_path, region_of_interest) {
-  bim_file_path <- get_regional_ld_meta(ld_meta_file_path, region_of_interest)$intersections$bim_file_paths
-  bim_data <- lapply(bim_file_path, function(bim_file) as.data.frame(vroom(bim_file, col_names = FALSE)))
-  snp_info <- setNames(lapply(bim_data, function(info_table) {
-    # for TWAS and MR, the variance and allele_freq are not necessary
-    if (ncol(info_table) >= 8) {
-      info_table <- info_table[, c(1, 2, 4:8)]
-      colnames(info_table) <- c("chrom", "id", "pos", "alt", "ref", "variance", "allele_freq")
-    } else if (ncol(info_table) == 6) {
-      info_table <- info_table[, c(1, 2, 4:6)]
-      colnames(info_table) <- c("chrom", "id", "pos", "alt", "ref")
-    } else {
-      warning("Unexpected number of columns; skipping this element.")
-      return(NULL)
-    }
-    info_table$id <- normalize_variant_id(info_table$id)
-    return(info_table)
-  }), sapply(names(bim_data), function(x) {
-    parts <- strsplit(basename(x), "[_:/.]")[[1]][1:3]
-    parts[1] <- strip_chr_prefix(parts[1])
-    paste(parts, collapse = "_")
-  }))
-  return(snp_info)
-}

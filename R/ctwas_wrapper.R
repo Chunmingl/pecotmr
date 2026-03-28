@@ -11,9 +11,9 @@ ctwas_ld_loader <- function(ld_matrix_file_path) {
 ctwas_bimfile_loader <- function(bim_file_path) {
   snp_info <- as.data.frame(vroom(bim_file_path, col_names = FALSE))
   if (ncol(snp_info) == 9) {
-    colnames(snp_info) <- c("chrom", "id", "GD", "pos", "alt", "ref", "variance", "allele_freq", "n_nomiss")
+    colnames(snp_info) <- c("chrom", "id", "GD", "pos", "A1", "A2", "variance", "allele_freq", "n_nomiss")
   } else {
-    colnames(snp_info) <- c("chrom", "id", "GD", "pos", "alt", "ref")
+    colnames(snp_info) <- c("chrom", "id", "GD", "pos", "A1", "A2")
   }
   snp_info$id <- normalize_variant_id(snp_info$id)
   return(snp_info)

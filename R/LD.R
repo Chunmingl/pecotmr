@@ -336,7 +336,7 @@ load_LD_matrix <- function(LD_meta_file_path, region, extract_coordinates = NULL
   if (return_genotype) {
     stop("return_genotype=TRUE requires PLINK genotype files, not pre-computed LD matrices.")
   }
-  load_LD_from_blocks(LD_meta_file_path, region, extract_coordinates)
+  load_LD_from_blocks(LD_meta_file_path, region, extract_coordinates, n_sample = n_sample)
 }
 
 # ---------- Internal: detect source type ----------
@@ -451,7 +451,7 @@ load_LD_from_genotype <- function(prefix, region, source_type,
 
 #' Load pre-computed LD from block-based metadata files.
 #' @noRd
-load_LD_from_blocks <- function(LD_meta_file_path, region, extract_coordinates = NULL) {
+load_LD_from_blocks <- function(LD_meta_file_path, region, extract_coordinates = NULL, n_sample = NULL) {
   # Intersect LD metadata with specified regions
   intersected_LD_files <- get_regional_ld_meta(LD_meta_file_path, region)
 
@@ -514,6 +514,15 @@ load_LD_from_blocks <- function(LD_meta_file_path, region, extract_coordinates =
     ref_panel$n_nomiss <- merged_variant_list$n_nomiss[match(rownames(LD_matrix), merged_variant_list$variants)]
   }
 
+  # Compute variance from n_sample + allele_freq if not already present
+  if (!is.null(n_sample) && (!"variance" %in% colnames(ref_panel) || all(is.na(ref_panel$variance)))) {
+    if ("allele_freq" %in% colnames(ref_panel)) {
+      p <- ref_panel$allele_freq
+      ref_panel$variance <- 2 * p * (1 - p) * n_sample / (n_sample - 1)
+      ref_panel$n_nomiss <- n_sample
+    }
+  }
+
   list(
     LD_variants = LD_variants,
     LD_matrix = LD_matrix,
@@ -538,43 +547,17 @@ load_LD_from_blocks <- function(LD_meta_file_path, region, extract_coordinates =
 #' @importFrom magrittr %>%
 #' @export
 filter_variants_by_ld_reference <- function(variant_ids, ld_reference_meta_file, keep_indel = TRUE) {
-  # Parse input variant IDs
   variants_df <- parse_variant_id(variant_ids)
 
-  # Derive region for ld_meta path (needed to find intersecting blocks)
+  # Derive region to scope the reference lookup
   region_df <- variants_df %>%
     group_by(chrom) %>%
     summarise(start = min(pos), end = max(pos))
 
-  source_type <- detect_ld_source_type(ld_reference_meta_file)
-
-  if (source_type == "plink2") {
-    pvar_path <- resolve_plink2_paths(ld_reference_meta_file)$pvar
-    pvar <- pgenlibr::NewPvar(pvar_path)
-    on.exit(pgenlibr::ClosePvar(pvar), add = TRUE)
-    ref_info <- read_pvar_info(pvar)
-    ref_chrom <- as.integer(strip_chr_prefix(ref_info$chrom))
-    # Filter to relevant region(s)
-    in_region <- ref_chrom %in% region_df$chrom &
-                 ref_info$pos >= region_df$start[match(ref_chrom, region_df$chrom)] &
-                 ref_info$pos <= region_df$end[match(ref_chrom, region_df$chrom)]
-    ref_key <- paste0(ref_chrom[in_region], ":", ref_info$pos[in_region])
-  } else if (source_type == "plink1") {
-    bim_data <- read_bim(paste0(ld_reference_meta_file, ".bed"))
-    ref_chrom <- as.integer(strip_chr_prefix(bim_data$chrom))
-    in_region <- ref_chrom %in% region_df$chrom &
-                 bim_data$pos >= region_df$start[match(ref_chrom, region_df$chrom)] &
-                 bim_data$pos <= region_df$end[match(ref_chrom, region_df$chrom)]
-    ref_key <- paste0(ref_chrom[in_region], ":", bim_data$pos[in_region])
-  } else {
-    # Pre-computed LD: read bim files via metadata
-    bim_file_paths <- get_regional_ld_meta(ld_reference_meta_file, region_df)$intersections$bim_file_paths
-    bim_data <- do.call(rbind, lapply(bim_file_paths, function(path) {
-      bim_df <- vroom(path, col_names = FALSE)
-      data.frame(chrom = bim_df$X1, pos = bim_df$X4, stringsAsFactors = FALSE)
-    }))
-    ref_key <- paste0(bim_data$chrom, ":", bim_data$pos)
-  }
+  # Use shared helper — no genotype loading
+  ref_info <- get_ref_variant_info(ld_reference_meta_file, region_df)
+  ref_chrom <- as.integer(strip_chr_prefix(ref_info$chrom))
+  ref_key <- paste0(ref_chrom, ":", ref_info$pos)
 
   variant_key <- paste0(variants_df$chrom, ":", variants_df$pos)
   keep_indices <- which(variant_key %in% ref_key)

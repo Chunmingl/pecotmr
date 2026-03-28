@@ -16,9 +16,10 @@
 #' @param gwas_meta_file A file path for a dataframe table with column of "study_id", "chrom" (integer), "file_path",
 #' "column_mapping_file". Each file in "file_path" column is tab-delimited dataframe of GWAS summary statistics with column name
 #' "chrom" (or #chrom" if tabix-indexed), "pos", "A2", "A1".
-#' @param ld_meta_file_path A tab-delimited data frame with colname "#chrom", "start", "end", "path", where "path" column
-#' contains file paths for both LD matrix and bim file and is separated by ",". Bim file input would expect no headers, while the
-#' columns are aligned in the order of "chrom", "variants", "GD", "pos", "A1", "A2", "variance", "allele_freq", "n_nomiss".
+#' @param ld_meta_file_path Path to LD reference: either a PLINK2/PLINK1 prefix, or a tab-delimited
+#'   metadata file with columns "#chrom", "start", "end", "path" (auto-detected).
+#' @param ld_reference_sample_size Sample size of the LD reference panel (integer). Required.
+#'   Used to compute per-variant variance as 2*p*(1-p)*n/(n-1). For ADSP R4, use 17000.
 #' @return A list of list for harmonized weights and dataframe of gwas summary statistics that is add to the original input of
 #' twas_weights_data under each context.
 #' @importFrom vroom vroom
@@ -26,7 +27,8 @@
 #' @importFrom S4Vectors queryHits subjectHits
 #' @importFrom IRanges IRanges findOverlaps start end reduce
 #' @export
-harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file, column_file_path = NULL, comment_string = "#") {
+harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file,
+                           ld_reference_sample_size, column_file_path = NULL, comment_string = "#") {
   # Function to group contexts based on start and end positions
   group_contexts_by_region <- function(twas_weights_data, molecular_id, chrom, tolerance = 5000) {
     region_info_df <- do.call(rbind, lapply(names(twas_weights_data$weights), function(context) {
@@ -95,16 +97,6 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file,
     return(merged_groups)
   }
 
-  # function to extract LD variance for the query region
-  query_variance <- function(ld_info_data, extract_coordinates) {
-    ld_info_data <- do.call(rbind, ld_info_data)
-    ld_pos <- as.numeric(ld_info_data[, 3]) 
-    ld_info_data_filtered <- ld_info_data[ld_pos %in% extract_coordinates$pos, , drop = FALSE]
-    variance_df <- ld_info_data_filtered[, c(1, 3:6)] # Extract the variance column (7th column)
-    colnames(variance_df) <- c("chrom", "pos", "A1", "A2", "variance")
-    return(variance_df)
-  }
-
   # Step 1: load TWAS weights data
   molecular_ids <- names(twas_weights_data)
   chrom <- as.integer(parse_number(gsub(":.*$", "", rownames(twas_weights_data[[1]]$weights[[1]])[1])))
@@ -119,9 +111,8 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file,
   }
   region_variants <- variant_id_to_df(unique(do.call(c, find_data(twas_weights_data, c(2, "variant_names")))))
   region_of_interest <- data.frame(chrom = chrom, start = min(region_variants$pos), end = max(region_variants$pos))
-  LD_list <- load_LD_matrix(ld_meta_file_path, region_of_interest, region_variants)
-  # load snp info once
-  snp_info <- load_ld_snp_info(ld_meta_file_path, region_of_interest)
+  LD_list <- load_LD_matrix(ld_meta_file_path, region_of_interest, region_variants,
+                            n_sample = ld_reference_sample_size)
   # remove duplicate variants
   dup_idx <- which(duplicated(LD_list$LD_variants))
   if (length(dup_idx) >= 1) {
@@ -209,10 +200,8 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file,
           }
           results[[molecular_id]][["variant_names"]][[context]][[study]] <- rownames(weights_matrix_subset)
 
-          # Step 6: scale weights by variance
-          variance_df <- query_variance(snp_info, all_variants) %>%
-            mutate(variants = format_variant_id(chrom, pos, A2, A1))
-          variance <- variance_df[match(rownames(weights_matrix_subset), variance_df$variants), "variance"]
+          # Step 6: scale weights by variance (from ref_panel, populated by load_LD_matrix)
+          variance <- LD_list$ref_panel$variance[match(rownames(weights_matrix_subset), LD_list$ref_panel$variant_id)]
           results[[molecular_id]][["weights_qced"]][[context]][[study]] <- list(scaled_weights = weights_matrix_subset * sqrt(variance), weights = weights_matrix_subset)
         }
         # Combine gwas sumstat across different context for a single context group (all variant_ids now in canonical format)
@@ -233,7 +222,7 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file,
     }
   }
   # return results
-  return(list(twas_data_qced = results, snp_info = snp_info))
+  return(list(twas_data_qced = results, ref_panel = LD_list$ref_panel))
 }
 
 #' Harmonize GWAS Summary Statistics 
@@ -293,6 +282,7 @@ twas_pipeline <- function(twas_weights_data,
                           ld_meta_file_path,
                           gwas_meta_file,
                           region_block,
+                          ld_reference_sample_size,
                           rsq_cutoff = 0.01,
                           rsq_pval_cutoff = 0.05,
                           rsq_option = c("rsq", "adj_rsq"),
@@ -582,7 +572,9 @@ twas_pipeline <- function(twas_weights_data,
   }
 
   # harmonize twas weights and gwas sumstats against LD
-  twas_data_qced_result <- harmonize_twas(twas_weights_data, ld_meta_file_path, gwas_meta_file, column_file_path = column_file_path, comment_string = comment_string)
+  twas_data_qced_result <- harmonize_twas(twas_weights_data, ld_meta_file_path, gwas_meta_file,
+                                          ld_reference_sample_size = ld_reference_sample_size,
+                                          column_file_path = column_file_path, comment_string = comment_string)
   twas_results_db <- lapply(names(twas_weights_data), function(weight_db) {
     twas_weights_data[[weight_db]][["molecular_id"]] <- weight_db
     twas_data_qced <- twas_data_qced_result$twas_data_qced
@@ -654,7 +646,7 @@ twas_pipeline <- function(twas_weights_data,
             warning(paste0("skip MR for ", weight_db, " for ", study, ", the effect_allele_frequency information is not available."))
             return(list(twas_rs_df = twas_rs_df, mr_rs_df = data.frame()))
           }
-          combined_ld_meta_df <- bind_rows(twas_data_qced_result$snp_info)
+          combined_ld_meta_df <- twas_data_qced_result$ref_panel
           mr_formatted_input <- mr_format(twas_weights_data[[weight_db]], context, twas_data_qced[[weight_db]][["gwas_qced"]][[study]],
             coverage = mr_coverage_column, allele_qc = TRUE, molecular_name_obj = c("molecular_id"), ld_meta_df = combined_ld_meta_df
           )

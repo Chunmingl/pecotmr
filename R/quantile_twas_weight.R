@@ -140,10 +140,10 @@ qr_screen <- function(
   # Split variant_id and reorder columns
   parsed <- parse_variant_id(df_result$variant_id)
   df_result <- df_result %>%
-    mutate(chr = parsed$chrom, pos = parsed$pos, ref = parsed$A2, alt = parsed$A1)
+    mutate(chr = parsed$chrom, pos = parsed$pos, A2 = parsed$A2, A1 = parsed$A1)
 
   # Define the column order
-  col_order <- c("chr", "pos", "ref", "alt", "phenotype_id", "variant_id", "p_qr")
+  col_order <- c("chr", "pos", "A2", "A1", "phenotype_id", "variant_id", "p_qr")
   col_order <- c(col_order, paste0("p_qr_", tau.list))
   col_order <- c(col_order, method_col_name)
   col_order <- c(col_order, paste0(method_col_name, "_", tau.list))
@@ -356,8 +356,8 @@ perform_qr_analysis <- function(X, Y, Z = NULL, tau_values = seq(0.05, 0.95, by 
     )
   parsed_ids <- parse_variant_id(result_table_wide$variant_id)
   result_table_wide <- result_table_wide %>%
-    mutate(chr = parsed_ids$chrom, pos = parsed_ids$pos, ref = parsed_ids$A2, alt = parsed_ids$A1) %>%
-    select(chr, pos, ref, alt, everything())
+    mutate(chr = parsed_ids$chrom, pos = parsed_ids$pos, A2 = parsed_ids$A2, A1 = parsed_ids$A1) %>%
+    select(chr, pos, A2, A1, everything())
 
   # Return the wide format result table
   return(result_table_wide)

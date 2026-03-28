@@ -34,7 +34,7 @@ A list with:
   \item{LD_matrix}{Symmetric LD correlation matrix (or genotype matrix if return_genotype=TRUE).}
   \item{ref_panel}{Data.frame with variant metadata (chrom, pos, A2, A1, variant_id,
     and optionally allele_freq, variance, n_nomiss).}
-  \item{block_metadata}{Data.frame with block info (block_id, chrom, size, start_idx, end_idx).}
+  \item{block_metadata}{Data.frame with block info (block_id, chrom, block_start, block_end, size, start_idx, end_idx).}
 }
 }
 \description{

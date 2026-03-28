@@ -94,7 +94,7 @@ allele_qc <- function(target_data, ref_variants, col_to_flip = NULL,
   }
   ref_variants <- variant_id_to_df(ref_variants)
 
-  columns_to_remove <- c("chromosome", "position", "ref", "alt", "variant_id")
+  columns_to_remove <- c("chromosome", "position", "A2", "A1", "ref", "alt", "variant_id")
 
   # Check if any of the specified columns are present
   if (any(columns_to_remove %in% colnames(target_data))) {
