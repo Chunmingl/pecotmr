@@ -470,6 +470,21 @@ load_LD_from_blocks <- function(LD_meta_file_path, region, extract_coordinates =
     }
   }
 
+  # Filter out empty blocks before combining
+  non_empty <- sapply(extracted_LD_variants_list, function(v) nrow(v) > 0)
+  if (!any(non_empty)) {
+    stop("No variants found in any LD block for the specified region.")
+  }
+  if (any(!non_empty)) {
+    message(paste(
+      "Removing", sum(!non_empty), "empty LD block(s) with no variants in the region."
+    ))
+    extracted_LD_matrices_list <- extracted_LD_matrices_list[non_empty]
+    extracted_LD_variants_list <- extracted_LD_variants_list[non_empty]
+    block_chroms <- block_chroms[non_empty]
+    LD_file_paths <- LD_file_paths[non_empty]
+  }
+
   LD_matrix <- create_LD_matrix(
     LD_matrices = extracted_LD_matrices_list,
     variants = extracted_LD_variants_list
@@ -600,6 +615,30 @@ partition_LD_matrix <- function(ld_data, merge_small_blocks = TRUE,
     !identical(rownames(combined_matrix), variant_ids) || !identical(colnames(combined_matrix), variant_ids)) {
     rownames(combined_matrix) <- variant_ids
     colnames(combined_matrix) <- variant_ids
+  }
+
+  # Filter out blocks with invalid indices (empty blocks, out-of-range, NA, Inf)
+  n_variants <- length(variant_ids)
+  valid_blocks <- sapply(seq_len(nrow(block_metadata)), function(i) {
+    s <- block_metadata$start_idx[i]
+    e <- block_metadata$end_idx[i]
+    sz <- block_metadata$size[i]
+    # Block is valid if: size > 0, indices are finite integers, and within range
+    !is.na(s) && !is.na(e) && is.finite(s) && is.finite(e) &&
+      sz > 0 && s >= 1 && e >= s && e <= n_variants
+  })
+
+  if (!any(valid_blocks)) {
+    stop("No valid LD blocks found. All block indices are out of range or empty.")
+  }
+
+  if (any(!valid_blocks)) {
+    message(paste(
+      "Removing", sum(!valid_blocks),
+      "LD block(s) with invalid or out-of-range indices."
+    ))
+    block_metadata <- block_metadata[valid_blocks, , drop = FALSE]
+    block_metadata$block_id <- seq_len(nrow(block_metadata))
   }
 
   # Validate the block structure of the matrix (skip if only one block)
