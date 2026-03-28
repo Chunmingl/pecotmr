@@ -77,6 +77,10 @@ get_regional_ld_meta <- function(ld_reference_meta_file, region, complete_covera
   names(genomic_data) <- c("chrom", "start", "end", "path")
   names(region) <- c("chrom", "start", "end")
 
+  # Treat start=0, end=0 as "covers all regions" (used for whole-chromosome PLINK files)
+  whole_chrom <- genomic_data$start == 0 & genomic_data$end == 0
+  if (any(whole_chrom)) genomic_data$end[whole_chrom] <- Inf
+
   # Order and deduplicate regions
   genomic_data <- order_dedup_regions(genomic_data)
   region <- order_dedup_regions(region)
@@ -216,15 +220,19 @@ create_LD_matrix <- function(LD_matrices, variants) {
 
 #' Load and Process Linkage Disequilibrium (LD) Matrix
 #'
-#' Unified entry point for loading LD data. Auto-detects the source type:
-#' \itemize{
-#'   \item Pre-computed LD blocks (metadata file with chrom/start/end/path columns)
-#'   \item PLINK2 genotype files (.pgen/.pvar[.zst]/.psam + .afreq)
-#'   \item PLINK1 genotype files (.bed/.bim/.fam)
-#' }
-#' For PLINK genotype sources, LD is computed on the fly via \code{compute_LD()}.
+#' Unified entry point for loading LD data from a metadata TSV file.
 #'
-#' @param LD_meta_file_path Path to LD metadata file, or prefix for PLINK genotype files.
+#' The metadata TSV must have columns: chrom, start, end, path. Two formats:
+#' \itemize{
+#'   \item Pre-computed LD blocks: many rows per chromosome with block boundaries
+#'     in start/end and path pointing to .cor.xz files (optionally comma-separated
+#'     with a .bim path).
+#'   \item PLINK genotype files: one row per chromosome with start=0, end=0, and
+#'     path pointing to a per-chromosome PLINK prefix (.pgen/.pvar[.zst]/.psam or
+#'     .bed/.bim/.fam). LD is computed on the fly via \code{compute_LD()}.
+#' }
+#'
+#' @param LD_meta_file_path Path to the LD metadata TSV file.
 #' @param region Region of interest: "chr:start-end" string or data.frame with chrom/start/end.
 #' @param extract_coordinates Optional data.frame with columns "chrom" and "pos" for
 #'   specific coordinates extraction (only for pre-computed LD blocks).
@@ -248,7 +256,13 @@ load_LD_matrix <- function(LD_meta_file_path, region, extract_coordinates = NULL
   source <- resolve_ld_source(LD_meta_file_path)
 
   if (source$type %in% c("plink2", "plink1")) {
-    return(load_LD_from_genotype(source$data_path, region, source$type,
+    # For PLINK via metadata TSV, resolve per-chromosome prefix
+    prefix <- if (!is.null(source$meta_path)) {
+      resolve_plink_prefix_for_region(source$meta_path, region, source$type)
+    } else {
+      source$data_path
+    }
+    return(load_LD_from_genotype(prefix, region, source$type,
                                  return_genotype = return_genotype,
                                  n_sample = n_sample))
   }
@@ -276,41 +290,71 @@ has_plink1_files <- function(prefix) {
     file.exists(paste0(prefix, ".fam"))
 }
 
-#' Resolve an LD source path to its actual data type.
+#' Resolve an LD source metadata TSV to its actual data type.
 #'
-#' Handles both direct PLINK prefixes and metadata TSV files (which may
-#' themselves point to PLINK files or pre-computed .cor.xz matrices).
+#' The metadata TSV has columns: chrom, start, end, path. Two formats are supported:
+#' \itemize{
+#'   \item Pre-computed LD blocks (.cor.xz): many rows per chromosome, each with
+#'     specific start/end block boundaries and path pointing to .cor.xz files.
+#'   \item PLINK genotype files: one row per chromosome with start=0, end=0,
+#'     and path pointing to a per-chromosome PLINK prefix. The actual region
+#'     filter is applied by the PLINK loader, not by block boundaries.
+#' }
 #'
-#' @param path Direct PLINK prefix or metadata TSV file path.
+#' This function peeks at the first row to determine the data type.
+#' The actual per-chromosome PLINK prefix is resolved later by
+#' \code{resolve_plink_prefix_for_region()} at load time.
+#'
+#' @param path Path to a metadata TSV file with columns chrom, start, end, path.
 #' @return A list with:
 #'   \item{type}{"plink2", "plink1", or "precomputed"}
-#'   \item{data_path}{Resolved PLINK prefix (for plink types)}
-#'   \item{meta_path}{Metadata TSV path (for precomputed, or when input was a TSV)}
+#'   \item{data_path}{PLINK prefix from first row (for type detection only; actual
+#'     per-chromosome prefix is resolved at load time)}
+#'   \item{meta_path}{The metadata TSV path (always set)}
 #' @importFrom vroom vroom
 #' @noRd
 resolve_ld_source <- function(path) {
-  # Direct PLINK prefix?
-  if (has_plink2_files(path)) return(list(type = "plink2", data_path = path))
-  if (has_plink1_files(path)) return(list(type = "plink1", data_path = path))
-
-  # Must be a metadata file
   if (!file.exists(path)) {
-    stop("Cannot determine LD source from path: ", path,
-         "\n  Expected: PLINK2 prefix (.pgen/.pvar[.zst]/.psam), ",
-         "PLINK1 prefix (.bed/.bim/.fam), or LD metadata file.")
+    stop("LD metadata file not found: ", path,
+         "\n  Expected: a TSV file with columns chrom, start, end, path.")
   }
 
-  # Peek at first row's path column to determine underlying data type
+  # Peek at first row to determine underlying data type
   meta <- as.data.frame(vroom(path, show_col_types = FALSE, n_max = 1))
-  colnames(meta)[1] <- "chrom"
+  colnames(meta) <- c("chrom", "start", "end", "path")[seq_len(ncol(meta))]
   raw_path <- gsub(",.*$", "", meta$path[1])  # strip comma-separated bim path
   resolved <- file.path(dirname(path), raw_path)
 
   if (has_plink2_files(resolved)) return(list(type = "plink2", data_path = resolved, meta_path = path))
   if (has_plink1_files(resolved)) return(list(type = "plink1", data_path = resolved, meta_path = path))
 
-  # Pre-computed .cor.xz blocks
+  # Pre-computed .cor.xz blocks — verify not using 0:0 sentinel
+  if (!is.na(meta$start) && !is.na(meta$end) && meta$start == 0 && meta$end == 0) {
+    stop("Metadata has start=0, end=0 but path does not resolve to PLINK files: ", resolved,
+         "\n  The 0:0 sentinel is only valid for whole-chromosome PLINK genotype files.")
+  }
+
   list(type = "precomputed", meta_path = path)
+}
+
+#' Resolve the correct PLINK prefix for a given region from a metadata TSV.
+#' Reads the TSV, finds the row matching the query region's chromosome,
+#' and returns the resolved PLINK prefix path.
+#' @importFrom vroom vroom
+#' @noRd
+resolve_plink_prefix_for_region <- function(meta_path, region, source_type) {
+  parsed <- parse_region(region)
+  meta <- as.data.frame(vroom(meta_path, show_col_types = FALSE))
+  colnames(meta) <- c("chrom", "start", "end", "path")
+  meta$chrom <- as.integer(strip_chr_prefix(meta$chrom))
+  query_chrom <- as.integer(strip_chr_prefix(parsed$chrom))
+
+  matching <- meta[meta$chrom == query_chrom, , drop = FALSE]
+  if (nrow(matching) == 0) {
+    stop("No entry for chromosome ", query_chrom, " in metadata file: ", meta_path)
+  }
+  raw_path <- gsub(",.*$", "", matching$path[1])
+  file.path(dirname(meta_path), raw_path)
 }
 
 # ---------- Internal: load LD from genotype files ----------

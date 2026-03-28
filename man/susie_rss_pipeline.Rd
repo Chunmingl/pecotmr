@@ -6,9 +6,9 @@
 \usage{
 susie_rss_pipeline(
   sumstats,
-  LD_mat,
+  LD_mat = NULL,
+  X_mat = NULL,
   n = NULL,
-  var_y = NULL,
   L = 5,
   max_L = 30,
   l_step = 5,
@@ -16,61 +16,44 @@ susie_rss_pipeline(
   coverage = 0.95,
   secondary_coverage = c(0.7, 0.5),
   signal_cutoff = 0.1,
-  min_abs_corr = 0.8
+  min_abs_corr = 0.8,
+  stochastic_ld_sample = NULL,
+  ...
 )
 }
 \arguments{
-\item{sumstats}{A list or data frame containing summary statistics with 'z' or 'beta' and 'se' columns.}
+\item{sumstats}{Data frame with 'z' or ('beta' and 'se') columns.}
 
-\item{LD_mat}{The LD matrix.}
+\item{LD_mat}{LD correlation matrix. Mutually exclusive with X_mat.}
 
-\item{n}{Sample size (default: NULL).}
+\item{X_mat}{Genotype matrix (samples x variants). Mutually exclusive with LD_mat.}
 
-\item{var_y}{Variance of Y (default: NULL).}
+\item{n}{Sample size.}
 
-\item{L}{Initial number of causal configurations to consider in the analysis (default: 5).}
+\item{L}{Initial number of causal configurations (default: 5).}
 
-\item{max_L}{Maximum number of causal configurations to consider in the analysis (default: 30).}
+\item{max_L}{Maximum number of causal configurations (default: 30).}
 
-\item{l_step}{Step size for increasing L when the limit is reached during dynamic adjustment (default: 5).}
+\item{l_step}{Step size for dynamic L adjustment (default: 5).}
 
-\item{analysis_method}{The analysis method to use. Options are "susie_rss", "single_effect", or "bayesian_conditional_regression" (default: "susie_rss").}
+\item{analysis_method}{One of "susie_rss", "single_effect", "bayesian_conditional_regression".}
 
-\item{coverage}{Coverage level for susie_rss analysis (default: 0.95).}
+\item{coverage}{Coverage level (default: 0.95).}
 
-\item{secondary_coverage}{Secondary coverage levels for susie_rss analysis (default: c(0.7, 0.5)).}
+\item{secondary_coverage}{Secondary coverage levels (default: c(0.7, 0.5)).}
 
-\item{signal_cutoff}{Signal cutoff for susie_post_processor (default: 0.1).}
+\item{signal_cutoff}{PIP cutoff for susie_post_processor (default: 0.1).}
 
-\item{min_abs_corr}{Minimum absolute correlation for credible set purity filtering (default: 0.8).}
+\item{min_abs_corr}{Minimum absolute correlation for CS purity (default: 0.8).}
+
+\item{stochastic_ld_sample}{Passed to susie_rss. NULL, TRUE, or integer.}
+
+\item{...}{Additional parameters passed to susie_rss (e.g., var_y).}
 }
 \value{
-A list containing the results of the SuSiE RSS analysis based on the specified method.
+A list with post-processed SuSiE RSS results.
 }
 \description{
-This function runs the SuSiE RSS pipeline, performing analysis based on the specified method.
-It processes the input summary statistics and LD data to provide results in a structured output.
-}
-\details{
-The `susie_rss_pipeline` function runs the SuSiE RSS pipeline based on the specified analysis method.
-  It takes the following main inputs:
-  - `sumstats`: A list or data frame containing summary statistics with 'z' or 'beta' and 'se' columns.
-  - `LD_mat`: The LD matrix.
-  - `n`: Sample size (optional).
-  - `var_y`: Variance of Y (optional).
-  - `L`: Initial number of causal configurations to consider in the analysis.
-  - `max_L`: Maximum number of causal configurations to consider in the analysis.
-  - `l_step`: Step size for increasing L when the limit is reached during dynamic adjustment.
-  - `analysis_method`: The analysis method to use. Options are "susie_rss", "single_effect", or "bayesian_conditional_regression".
-  The function first checks if the `sumstats` input contains 'z' or 'beta' and 'se' columns. If 'z' is present, it is used directly.
-  If 'beta' and 'se' are present, 'z' is calculated as 'beta' divided by 'se'.
-
-  Based on the specified `analysis_method`, the function calls the `susie_rss_wrapper` with the appropriate parameters.
-  - For "single_effect" method, `L` is set to 1.
-  - For "susie_rss" and "bayesian_conditional_regression" methods, `L`, `max_L`, and `l_step` are used.
-  - For "bayesian_conditional_regression" method, `max_iter` is set to 1.
-
-  The results are then post-processed using the `susie_post_processor` function with the specified `signal_cutoff` and `secondary_coverage` values.
-
-  The function returns a list containing the results of the SuSiE RSS analysis based on the specified method.
+Runs SuSiE RSS analysis with the specified method. Supports both z+R
+(correlation matrix) and z+X (genotype matrix) interfaces.
 }

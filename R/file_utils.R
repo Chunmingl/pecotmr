@@ -202,18 +202,24 @@ read_pvar_info <- function(pvar) {
 get_ref_variant_info <- function(source, region = NULL) {
   resolved <- resolve_ld_source(source)
 
+  # For PLINK via metadata, resolve per-chromosome prefix
+  if (resolved$type %in% c("plink2", "plink1") && !is.null(resolved$meta_path) && !is.null(region)) {
+    data_path <- resolve_plink_prefix_for_region(resolved$meta_path, region, resolved$type)
+  } else {
+    data_path <- resolved$data_path
+  }
+
   if (resolved$type == "plink2") {
-    paths <- resolve_plink2_paths(resolved$data_path)
+    paths <- resolve_plink2_paths(data_path)
     pvar <- pgenlibr::NewPvar(paths$pvar)
     on.exit(pgenlibr::ClosePvar(pvar), add = TRUE)
     info <- read_pvar_info(pvar)
-    # Attach allele frequency from .afreq if available
-    afreq <- read_afreq(resolved$data_path)
+    afreq <- read_afreq(data_path)
     if (!is.null(afreq)) {
       info$allele_freq <- afreq$alt_freq[match(info$id, afreq$id)]
     }
   } else if (resolved$type == "plink1") {
-    bim <- read_bim(paste0(resolved$data_path, ".bed"))
+    bim <- read_bim(paste0(data_path, ".bed"))
     info <- data.frame(
       chrom = bim$chrom, id = bim$id, pos = bim$pos,
       A2 = bim$a0, A1 = bim$a1,
@@ -413,17 +419,17 @@ load_plink1_data <- function(prefix, region = NULL, keep_indel = TRUE, keep_vari
 #'
 #' @export
 load_genotype_region <- function(genotype, region = NULL, keep_indel = TRUE, keep_variants_path = NULL) {
-  resolved <- resolve_ld_source(genotype)
-  if (resolved$type == "plink2") {
-    return(load_plink2_data(resolved$data_path, region = region, keep_indel = keep_indel,
+  # Direct PLINK prefix detection (no metadata TSV required)
+  if (has_plink2_files(genotype)) {
+    return(load_plink2_data(genotype, region = region, keep_indel = keep_indel,
                             keep_variants_path = keep_variants_path)$X)
   }
-  if (resolved$type == "plink1") {
-    return(load_plink1_data(resolved$data_path, region = region, keep_indel = keep_indel,
+  if (has_plink1_files(genotype)) {
+    return(load_plink1_data(genotype, region = region, keep_indel = keep_indel,
                             keep_variants_path = keep_variants_path)$X)
   }
-  stop("Genotype files not found. Expected PLINK2 (.pgen/.pvar[.zst]/.psam), ",
-       "PLINK1 (.bed/.bim/.fam), or metadata TSV pointing to PLINK files at: ", genotype)
+  stop("Genotype files not found at prefix: ", genotype,
+       "\n  Expected: .pgen/.pvar[.zst]/.psam or .bed/.bim/.fam")
 }
 
 #' @importFrom purrr map

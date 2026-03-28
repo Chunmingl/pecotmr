@@ -13,7 +13,7 @@ load_LD_matrix(
 )
 }
 \arguments{
-\item{LD_meta_file_path}{Path to LD metadata file, or prefix for PLINK genotype files.}
+\item{LD_meta_file_path}{Path to the LD metadata TSV file.}
 
 \item{region}{Region of interest: "chr:start-end" string or data.frame with chrom/start/end.}
 
@@ -38,11 +38,16 @@ A list with:
 }
 }
 \description{
-Unified entry point for loading LD data. Auto-detects the source type:
-\itemize{
-  \item Pre-computed LD blocks (metadata file with chrom/start/end/path columns)
-  \item PLINK2 genotype files (.pgen/.pvar[.zst]/.psam + .afreq)
-  \item PLINK1 genotype files (.bed/.bim/.fam)
+Unified entry point for loading LD data from a metadata TSV file.
 }
-For PLINK genotype sources, LD is computed on the fly via \code{compute_LD()}.
+\details{
+The metadata TSV must have columns: chrom, start, end, path. Two formats:
+\itemize{
+  \item Pre-computed LD blocks: many rows per chromosome with block boundaries
+    in start/end and path pointing to .cor.xz files (optionally comma-separated
+    with a .bim path).
+  \item PLINK genotype files: one row per chromosome with start=0, end=0, and
+    path pointing to a per-chromosome PLINK prefix (.pgen/.pvar[.zst]/.psam or
+    .bed/.bim/.fam). LD is computed on the fly via \code{compute_LD()}.
+}
 }
