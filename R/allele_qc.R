@@ -113,8 +113,6 @@ allele_qc <- function(target_data, ref_variants, col_to_flip = NULL,
   match_result = match_result %>%
 	mutate(variants_id_original = format_variant_id(chrom, pos, A2.target, A1.target)) %>%
 	mutate(variants_id_qced = format_variant_id(chrom, pos, A2.ref, A1.ref)) %>%
-	# filter out totally same rows.
-	filter(duplicated(.) | !duplicated(.)) %>%
 	# upper case target/reference A1 A2
 	mutate(across(c(A1.target, A2.target, A1.ref, A2.ref), toupper)) %>%
 	mutate(flip1.ref = strand_flip(A1.ref), flip2.ref = strand_flip(A2.ref)) %>%
@@ -151,13 +149,13 @@ allele_qc <- function(target_data, ref_variants, col_to_flip = NULL,
 	match_result <- match_result %>% mutate(keep = if_else(INDEL, FALSE, keep))
   }
 
-  # flip the signs of the column col_to_flip if there is a sign flip
+  # Flip the signs of col_to_flip for sign-flipped variants
   if (!is.null(col_to_flip)) {
-	if (!is.null(match_result[, col_to_flip])) {
-	  match_result[match_result$sign_flip, col_to_flip] <- -1 * match_result[match_result$sign_flip, col_to_flip]
-	} else {
-	  stop("Column '", col_to_flip, "' not found in target_data.")
+	missing <- setdiff(col_to_flip, colnames(match_result))
+	if (length(missing) > 0) {
+	  stop("Column(s) '", paste(missing, collapse = "', '"), "' not found in target_data.")
 	}
+	match_result[match_result$sign_flip, col_to_flip] <- -1 * match_result[match_result$sign_flip, col_to_flip]
   }
   # flip the strands if there is a strand flip
   if (flip_strand) {
@@ -178,15 +176,16 @@ allele_qc <- function(target_data, ref_variants, col_to_flip = NULL,
 	}
   }
 
+  qc_cols <- c("flip1.ref", "flip2.ref", "strand_unambiguous", "non_ATCG",
+               "exact_match", "sign_flip", "strand_flip", "INDEL", "ID_match", "keep")
   result <- result %>%
-	select(-(flip1.ref:keep)) %>%
-	select(-A1.target, -A2.target) %>%
+	select(-any_of(qc_cols), -A1.target, -A2.target) %>%
 	rename(A1 = A1.ref, A2 = A2.ref, variant_id = variants_id_qced)
 
   if (!remove_unmatched) {
 	match_variant <- result %>% pull(variants_id_original)
-	match_result <- select(match_result, -(flip1.ref:keep)) %>%
-	  select(-variants_id_original, -A1.target, -A2.target) %>%
+	match_result <- match_result %>%
+	  select(-any_of(qc_cols), -variants_id_original, -A1.target, -A2.target) %>%
 	  rename(A1 = A1.ref, A2 = A2.ref, variant_id = variants_id_qced)
 	target_data <- target_data %>% mutate(variant_id = format_variant_id(chrom, pos, A2, A1))
 	if (length(setdiff(target_data %>% pull(variant_id), match_variant)) > 0) {
