@@ -324,52 +324,78 @@ create_LD_matrix <- function(LD_matrices, variants) {
 #' @export
 load_LD_matrix <- function(LD_meta_file_path, region, extract_coordinates = NULL,
                            return_genotype = FALSE, n_sample = NULL) {
-  source_type <- detect_ld_source_type(LD_meta_file_path)
+  source <- resolve_ld_source(LD_meta_file_path)
 
-  if (source_type %in% c("plink1", "plink2")) {
-    return(load_LD_from_genotype(LD_meta_file_path, region, source_type,
+  if (source$type %in% c("plink2", "plink1")) {
+    return(load_LD_from_genotype(source$data_path, region, source$type,
                                  return_genotype = return_genotype,
                                  n_sample = n_sample))
   }
 
-  # Pre-computed LD blocks
+  # Pre-computed LD blocks (.cor.xz)
   if (return_genotype) {
     stop("return_genotype=TRUE requires PLINK genotype files, not pre-computed LD matrices.")
   }
-  load_LD_from_blocks(LD_meta_file_path, region, extract_coordinates, n_sample = n_sample)
+  load_LD_from_blocks(source$meta_path, region, extract_coordinates, n_sample = n_sample)
 }
 
-# ---------- Internal: detect source type ----------
+# ---------- Internal: resolve LD source type ----------
 
-#' Detect whether a path points to PLINK2, PLINK1, or pre-computed LD metadata.
-#' @return Character: "plink2", "plink1", or "ld_meta".
 #' @noRd
-detect_ld_source_type <- function(path) {
-  # PLINK2: prefix.pgen + prefix.pvar[.zst] + prefix.psam
-  if (file.exists(paste0(path, ".pgen")) &&
-      (file.exists(paste0(path, ".pvar")) || file.exists(paste0(path, ".pvar.zst"))) &&
-      file.exists(paste0(path, ".psam"))) {
-    return("plink2")
+has_plink2_files <- function(prefix) {
+  file.exists(paste0(prefix, ".pgen")) &&
+    (file.exists(paste0(prefix, ".pvar")) || file.exists(paste0(prefix, ".pvar.zst"))) &&
+    file.exists(paste0(prefix, ".psam"))
+}
+
+#' @noRd
+has_plink1_files <- function(prefix) {
+  file.exists(paste0(prefix, ".bed")) &&
+    file.exists(paste0(prefix, ".bim")) &&
+    file.exists(paste0(prefix, ".fam"))
+}
+
+#' Resolve an LD source path to its actual data type.
+#'
+#' Handles both direct PLINK prefixes and metadata TSV files (which may
+#' themselves point to PLINK files or pre-computed .cor.xz matrices).
+#'
+#' @param path Direct PLINK prefix or metadata TSV file path.
+#' @return A list with:
+#'   \item{type}{"plink2", "plink1", or "precomputed"}
+#'   \item{data_path}{Resolved PLINK prefix (for plink types)}
+#'   \item{meta_path}{Metadata TSV path (for precomputed, or when input was a TSV)}
+#' @importFrom vroom vroom
+#' @noRd
+resolve_ld_source <- function(path) {
+  # Direct PLINK prefix?
+  if (has_plink2_files(path)) return(list(type = "plink2", data_path = path))
+  if (has_plink1_files(path)) return(list(type = "plink1", data_path = path))
+
+  # Must be a metadata file
+  if (!file.exists(path)) {
+    stop("Cannot determine LD source from path: ", path,
+         "\n  Expected: PLINK2 prefix (.pgen/.pvar[.zst]/.psam), ",
+         "PLINK1 prefix (.bed/.bim/.fam), or LD metadata file.")
   }
-  # PLINK1: prefix.bed + prefix.bim + prefix.fam
-  if (file.exists(paste0(path, ".bed")) &&
-      file.exists(paste0(path, ".bim")) &&
-      file.exists(paste0(path, ".fam"))) {
-    return("plink1")
-  }
-  # Pre-computed LD metadata (text file)
-  if (file.exists(path)) {
-    return("ld_meta")
-  }
-  stop("Cannot determine LD source type from path: ", path,
-       "\n  Expected: PLINK2 prefix (.pgen/.pvar[.zst]/.psam), ",
-       "PLINK1 prefix (.bed/.bim/.fam), or LD metadata file.")
+
+  # Peek at first row's path column to determine underlying data type
+  meta <- as.data.frame(vroom(path, show_col_types = FALSE, n_max = 1))
+  colnames(meta)[1] <- "chrom"
+  raw_path <- gsub(",.*$", "", meta$path[1])  # strip comma-separated bim path
+  resolved <- file.path(dirname(path), raw_path)
+
+  if (has_plink2_files(resolved)) return(list(type = "plink2", data_path = resolved, meta_path = path))
+  if (has_plink1_files(resolved)) return(list(type = "plink1", data_path = resolved, meta_path = path))
+
+  # Pre-computed .cor.xz blocks
+  list(type = "precomputed", meta_path = path)
 }
 
 # ---------- Internal: load LD from genotype files ----------
 
 #' Load genotype data from PLINK files and compute LD or return genotype matrix.
-#' @param source_type Character, "plink1" or "plink2" (from detect_ld_source_type).
+#' @param source_type Character, "plink1" or "plink2" (from resolve_ld_source).
 #' @noRd
 load_LD_from_genotype <- function(prefix, region, source_type,
                                   return_genotype = FALSE, n_sample = NULL) {

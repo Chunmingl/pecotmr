@@ -200,20 +200,20 @@ read_pvar_info <- function(pvar) {
 #' @importFrom vroom vroom
 #' @export
 get_ref_variant_info <- function(source, region = NULL) {
-  source_type <- detect_ld_source_type(source)
+  resolved <- resolve_ld_source(source)
 
-  if (source_type == "plink2") {
-    paths <- resolve_plink2_paths(source)
+  if (resolved$type == "plink2") {
+    paths <- resolve_plink2_paths(resolved$data_path)
     pvar <- pgenlibr::NewPvar(paths$pvar)
     on.exit(pgenlibr::ClosePvar(pvar), add = TRUE)
     info <- read_pvar_info(pvar)
     # Attach allele frequency from .afreq if available
-    afreq <- read_afreq(source)
+    afreq <- read_afreq(resolved$data_path)
     if (!is.null(afreq)) {
       info$allele_freq <- afreq$alt_freq[match(info$id, afreq$id)]
     }
-  } else if (source_type == "plink1") {
-    bim <- read_bim(paste0(source, ".bed"))
+  } else if (resolved$type == "plink1") {
+    bim <- read_bim(paste0(resolved$data_path, ".bed"))
     info <- data.frame(
       chrom = bim$chrom, id = bim$id, pos = bim$pos,
       A2 = bim$a0, A1 = bim$a1,
@@ -221,7 +221,7 @@ get_ref_variant_info <- function(source, region = NULL) {
     )
   } else {
     # Pre-computed LD: read bim files via metadata
-    bim_paths <- get_regional_ld_meta(source, region)$intersections$bim_file_paths
+    bim_paths <- get_regional_ld_meta(resolved$meta_path, region)$intersections$bim_file_paths
     info <- do.call(rbind, lapply(bim_paths, function(path) {
       df <- as.data.frame(vroom(path, col_names = FALSE, show_col_types = FALSE))
       out <- data.frame(
@@ -413,17 +413,17 @@ load_plink1_data <- function(prefix, region = NULL, keep_indel = TRUE, keep_vari
 #'
 #' @export
 load_genotype_region <- function(genotype, region = NULL, keep_indel = TRUE, keep_variants_path = NULL) {
-  # detect_ld_source_type (from LD.R) checks PLINK2 → PLINK1 → ld_meta
-  source_type <- detect_ld_source_type(genotype)
-  if (source_type == "plink2") {
-    return(load_plink2_data(genotype, region = region, keep_indel = keep_indel,
+  resolved <- resolve_ld_source(genotype)
+  if (resolved$type == "plink2") {
+    return(load_plink2_data(resolved$data_path, region = region, keep_indel = keep_indel,
                             keep_variants_path = keep_variants_path)$X)
   }
-  if (source_type == "plink1") {
-    return(load_plink1_data(genotype, region = region, keep_indel = keep_indel,
+  if (resolved$type == "plink1") {
+    return(load_plink1_data(resolved$data_path, region = region, keep_indel = keep_indel,
                             keep_variants_path = keep_variants_path)$X)
   }
-  stop("Genotype files not found. Expected .pgen/.pvar[.zst]/.psam or .bed/.bim/.fam at prefix: ", genotype)
+  stop("Genotype files not found. Expected PLINK2 (.pgen/.pvar[.zst]/.psam), ",
+       "PLINK1 (.bed/.bim/.fam), or metadata TSV pointing to PLINK files at: ", genotype)
 }
 
 #' @importFrom purrr map
