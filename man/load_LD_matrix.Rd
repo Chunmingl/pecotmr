@@ -33,10 +33,12 @@ Only used for PLINK genotype sources.}
 A list with:
 \describe{
   \item{LD_variants}{Character vector of variant IDs (canonical format).}
-  \item{LD_matrix}{Symmetric LD correlation matrix (or genotype matrix if return_genotype=TRUE).}
+  \item{LD_matrix}{LD correlation matrix R (or genotype matrix X when return_genotype is TRUE or "auto" with PLINK source).}
   \item{ref_panel}{Data.frame with variant metadata (chrom, pos, A2, A1, variant_id,
     and optionally allele_freq, variance, n_nomiss).}
-  \item{block_metadata}{Data.frame with block info (block_id, chrom, block_start, block_end, size, start_idx, end_idx).}
+  \item{is_genotype}{Logical: TRUE if LD_matrix contains genotype X, FALSE if correlation R.}
+  \item{block_metadata}{Data.frame with region/block info. For pre-computed LD: one row per block.
+    For PLINK: a single row spanning the loaded region.}
 }
 }
 \description{
