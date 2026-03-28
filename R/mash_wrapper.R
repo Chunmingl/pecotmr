@@ -424,7 +424,7 @@ merge_susie_cs <- function(susie_fit, coverage = "cs_coverage_0.95", complementa
   # Loop through each condition and their credible sets
   extract_top_loci <- function(susie_fit, complementary, coverage) {
     results <- list()
-    for (i in 1:length(names(susie_fit[[1]]))) {
+    for (i in seq_along(names(susie_fit[[1]]))) {
       if (!is.null(susie_fit[[1]][[i]][["top_loci"]]) && nrow(susie_fit[[1]][[i]][["top_loci"]]) !=
         0) {
         if (!complementary) {
@@ -970,7 +970,7 @@ load_multicontext_sumstats <- function(dat_list, signal_df, cond, region, extrac
   trait_names <- names(dat_list[[1]])
     if (cond == "strong" && region %in% signal_df$gene_ID){
   events <- signal_df %>% filter(gene_ID == region) %>% pull(event_ID) %>% unique()                    
-  for (j in 1:length(events)){                           
+  for (j in seq_along(events)){                           
         ref_df_filtered <- signal_df %>% filter(gene_ID == region, event_ID == events[j]) %>% 
             filter(!str_detect(context_classify, "NE"))
         if(dim(ref_df_filtered)[1] == 0) next

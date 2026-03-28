@@ -527,7 +527,7 @@ filter_by_common_samples <- function(dat, common_samples) {
 prepare_data_list <- function(geno_bed, phenotype, covariate, imiss_cutoff, maf_cutoff, mac_cutoff, xvar_cutoff, phenotype_header = 4, keep_samples = NULL) {
   data_list <- tibble(
     covar = covariate,
-    Y = lapply(phenotype, function(x) apply(x[-c(1:phenotype_header), , drop = F], c(1, 2), as.numeric))
+    Y = lapply(phenotype, function(x) apply(x[-c(1:phenotype_header), , drop = FALSE], c(1, 2), as.numeric))
   ) %>%
     mutate(
       # Determine common complete samples across Y, covar, and geno_bed, considering missing values

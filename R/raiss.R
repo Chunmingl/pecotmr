@@ -251,10 +251,10 @@ raiss_model <- function(zt, sig_t, sig_i_t, lamb = 0.01, rcond = 0.01, batch = T
     stop("zt, sig_t, and sig_i_t must be numeric.")
   }
   if (batch) {
-    condition_number <- if (report_condition_number) rep(kappa(sig_t, exact = T, norm = "2"), nrow(sig_i_t)) else NA
+    condition_number <- if (report_condition_number) rep(kappa(sig_t, exact = TRUE, norm = "2"), nrow(sig_i_t)) else NA
     correct_inversion <- rep(check_inversion(sig_t, sig_t_inv), nrow(sig_i_t))
   } else {
-    condition_number <- if (report_condition_number) kappa(sig_t, exact = T, norm = "2") else NA
+    condition_number <- if (report_condition_number) kappa(sig_t, exact = TRUE, norm = "2") else NA
     correct_inversion <- check_inversion(sig_t, sig_t_inv)
   }
 

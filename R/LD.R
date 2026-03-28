@@ -580,7 +580,7 @@ filter_variants_by_ld_reference <- function(variant_ids, ld_reference_meta_file,
     group_by(chrom) %>%
     summarise(start = min(pos), end = max(pos))
 
-  # Use shared helper — no genotype loading
+  # Use shared helper -- no genotype loading
   ref_info <- get_ref_variant_info(ld_reference_meta_file, region_df)
   ref_chrom <- as.integer(strip_chr_prefix(ref_info$chrom))
   ref_key <- paste0(ref_chrom, ":", ref_info$pos)

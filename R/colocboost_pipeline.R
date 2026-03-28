@@ -185,7 +185,7 @@ colocboost_analysis_pipeline <- function(region_data,
   ####### ========= Filtering events before QC =========== #########
   if (!is.null(event_filters) & !is.null(region_data$individual_data)) {
     Y <- region_data$individual_data$residual_Y
-    Y <- lapply(1:length(Y), function(i) {
+    Y <- lapply(seq_along(Y), function(i) {
       y <- Y[[i]]
       events <- colnames(y)
       condition <- names(Y)[i]
@@ -227,7 +227,7 @@ colocboost_analysis_pipeline <- function(region_data,
       Y <- NULL
     }
     if (!is.null(Y)) {
-      Y <- lapply(1:length(Y), function(i) {
+      Y <- lapply(seq_along(Y), function(i) {
         y <- Y[[i]]
         lapply(seq_len(ncol(y)), function(j) y[, j, drop = FALSE] %>% setNames(colnames(y)[j]))
       })
@@ -460,7 +460,7 @@ qc_regional_data <- function(region_data,
                              impute_opts = list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5, lamb = 0.01)) {
   qc_method <- match.arg(qc_method)
 
-  # Validate and recycle pip_cutoff_to_skip_ind: scalar → recycled to n_contexts
+  # Validate and recycle pip_cutoff_to_skip_ind: scalar -> recycled to n_contexts
   if (!is.null(region_data$individual_data)) {
     n_ind_contexts <- length(region_data$individual_data$residual_Y)
     if (length(pip_cutoff_to_skip_ind) == 1) {
@@ -470,7 +470,7 @@ qc_regional_data <- function(region_data,
     }
   }
 
-  # Validate pip_cutoff_to_skip_sumstat: scalar → named vector for all studies
+  # Validate pip_cutoff_to_skip_sumstat: scalar -> named vector for all studies
   if (!is.null(region_data$sumstat_data)) {
     all_study_names <- unlist(lapply(region_data$sumstat_data$sumstats, names))
     if (length(pip_cutoff_to_skip_sumstat) == 1 && is.null(names(pip_cutoff_to_skip_sumstat))) {
@@ -487,7 +487,7 @@ qc_regional_data <- function(region_data,
   #### related internal functions
   # Add context names to colname of Y if missing
   add_context_to_Y <- function(res_Y) {
-    res <- lapply(1:length(res_Y), function(iy) {
+    res <- lapply(seq_along(res_Y), function(iy) {
       y <- res_Y[[iy]]
       if (is.null(y)) {
         return(NULL)
@@ -617,7 +617,7 @@ qc_regional_data <- function(region_data,
         LD_matrix_partitioned <- partition_LD_matrix(LD_data)
       }
 
-      for (ii in 1:length(sumstats)) {
+      for (ii in seq_along(sumstats)) {
         sumstat <- sumstats[[ii]]
         if (nrow(sumstat$sumstats) == 0) next
         n <- sumstat$n

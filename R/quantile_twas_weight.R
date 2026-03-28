@@ -72,13 +72,13 @@ qr_screen <- function(
     }
     VN2 <- matrix(outer(VN, t(xstar) %*% xstar, "*"), nrow = ltau)
     z_score <- SN / sqrt(diag(VN2))
-    pvalue1 <- pchisq(SN^2 / diag(VN2), 1, lower.tail = F)
+    pvalue1 <- pchisq(SN^2 / diag(VN2), 1, lower.tail = FALSE)
     names(pvalue1) <- tau.list
     quantile.pvalue[ip, ] <- pvalue1
     quantile.zscore[ip, ] <- z_score
     e <- solve(chol(VN2))
     SN2 <- t(e) %*% SN
-    pvalue <- pchisq(sum(SN2^2), ltau, lower.tail = F)
+    pvalue <- pchisq(sum(SN2^2), ltau, lower.tail = FALSE)
     pvec[ip] <- pvalue
   }
 
@@ -383,7 +383,7 @@ corr_filter <- function(X, cor_thres = 0.8) {
   ind.delete <- NULL
   X.new <- X
   filter.id <- c(1:p)
-  for (ig in 1:length(groups)) {
+  for (ig in seq_along(groups)) {
     temp.group <- which(clusters == groups[ig])
     if (length(temp.group) > 1) {
       ind.delete <- c(ind.delete, temp.group[-1])
@@ -636,16 +636,16 @@ calculate_qr_and_pseudo_R2 <- function(AssocData, tau.list, strategy = c("correl
   message("Finished fitting full model. Start fitting intercept-only model for all taus...")
   fit_intercept <- suppressWarnings(quantreg::rq(AssocData$Y ~ 1, tau = tau.list, data = AssocData))
   message("Finished fitting intercept-only model.")
-  # Define the rho function for pseudo R² calculation
+  # Define the rho function for pseudo R2 calculation
   rho <- function(u, tau) {
     u * (tau - (u < 0))
   }
 
-  # Prepare to store the pseudo R² results
+  # Prepare to store the pseudo R2 results
   pseudo_R2 <- numeric(length(tau.list))
   names(pseudo_R2) <- tau.list
 
-  # Calculate pseudo R² for each tau
+  # Calculate pseudo R2 for each tau
   for (i in seq_along(tau.list)) {
     tau <- tau.list[i]
 
@@ -653,7 +653,7 @@ calculate_qr_and_pseudo_R2 <- function(AssocData, tau.list, strategy = c("correl
     residuals0 <- residuals(fit_intercept, subset = i)
     residuals1 <- residuals(fit_full, subset = i)
 
-    # Calculate and store pseudo R² for each tau
+    # Calculate and store pseudo R2 for each tau
     rho0 <- sum(rho(residuals0, tau))
     rho1 <- sum(rho(residuals1, tau))
     pseudo_R2[i] <- 1 - rho1 / rho0

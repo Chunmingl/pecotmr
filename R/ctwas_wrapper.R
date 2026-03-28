@@ -55,7 +55,7 @@ trim_ctwas_variants <- function(region_data, twas_weight_cutoff = 1e-5, cs_min_c
 
     if ("cs_variants" %in% names(region_data$susie_weights_intermediate[[molecular_id]][[context]]) & length(region_data$susie_weights_intermediate[[molecular_id]][[context]][["cs_variants"]]) != 0) {
       cs_min_abs_cor <- region_data$susie_weights_intermediate[[molecular_id]][[context]]$cs_purity$min.abs.corr
-      for (L in 1:length(region_data$susie_weights_intermediate[[molecular_id]][[context]]$cs_variants)) {
+      for (L in seq_along(region_data$susie_weights_intermediate[[molecular_id]][[context]]$cs_variants)) {
         # we includ all variants in $cs_variant if min_abs_corr > cs_min_cor for the set
         if (cs_min_abs_cor[L] >= cs_min_cor) {
           cs_variants <- region_data$susie_weights_intermediate[[molecular_id]][[context]]$cs_variants[[L]]

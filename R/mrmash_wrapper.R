@@ -224,7 +224,7 @@ compute_coefficients_glasso <- function(X, Y, standardize, nthreads, Xnew = NULL
   # Build matrix of initial estimates for mr.mash
   B <- matrix(as.numeric(NA), nrow = p, ncol = r)
 
-  for (i in 1:length(coeff_glmnet)) {
+  for (i in seq_along(coeff_glmnet)) {
     B[, i] <- as.vector(coeff_glmnet[[i]])[-1]
   }
 

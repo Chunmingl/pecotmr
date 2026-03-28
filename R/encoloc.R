@@ -163,7 +163,7 @@ process_coloc_results <- function(coloc_result, LD_meta_file_path, analysis_regi
     cs <- list()
     purity <- NULL
 
-    for (n in 1:length(ordered_results)) {
+    for (n in seq_along(ordered_results)) {
       tmp_coloc_results_fil <- ordered_results[[n]]
       tmp_coloc_results_fil_csm <- calculate_cumsum(tmp_coloc_results_fil)
       cs[[n]] <- tmp_coloc_results_fil[, 1][1:(which(tmp_coloc_results_fil_csm > coverage) %>% min())]
@@ -238,17 +238,17 @@ coloc_wrapper <- function(xqtl_file, gwas_files,
     gwas_data <- if (!is.null(gwas_finemapping_obj)) get_nested_element(raw_data, gwas_finemapping_obj) else raw_data
     gwas_lbf_matrix <- as.data.frame(gwas_data$lbf_variable)
       # fsusie has a different structure
-    if(is.null(gwas_lbf_matrix) | nrow(gwas_lbf_matrix)==0){
+    if(is.null(gwas_lbf_matrix) || nrow(gwas_lbf_matrix)==0){
         gwas_lbf_matrix <- do.call(rbind, raw_data[[1]]$fsusie_result$lBF) %>% as.data.frame
         if(nrow(gwas_lbf_matrix) > 0) message("This is a fSuSiE case")
     }
     if (filter_lbf_cs & is.null(filter_lbf_cs_secondary)) {
-        gwas_lbf_matrix <- gwas_lbf_matrix[gwas_data$sets$cs_index,, drop = F]
+        gwas_lbf_matrix <- gwas_lbf_matrix[gwas_data$sets$cs_index,, drop = FALSE]
     } else if (!is.null(filter_lbf_cs_secondary)) {
         gwas_lbf_filter_index <- get_filter_lbf_index(gwas_data, coverage = filter_lbf_cs_secondary) 
-        gwas_lbf_matrix <- gwas_lbf_matrix[gwas_lbf_filter_index,, drop = F]
+        gwas_lbf_matrix <- gwas_lbf_matrix[gwas_lbf_filter_index,, drop = FALSE]
     } else {
-      gwas_lbf_matrix <- gwas_lbf_matrix[gwas_data$V > prior_tol,, drop = F]
+      gwas_lbf_matrix <- gwas_lbf_matrix[gwas_data$V > prior_tol,, drop = FALSE]
     }
     if (!is.null(gwas_varname_obj)) colnames(gwas_lbf_matrix) <- get_nested_element(raw_data, gwas_varname_obj)
     # fsusie could have NA in variant name
@@ -290,12 +290,12 @@ coloc_wrapper <- function(xqtl_file, gwas_files,
     }
     # fsusie data does not have V element in results
     if (filter_lbf_cs & is.null(filter_lbf_cs_secondary)) {
-        xqtl_lbf_matrix <- xqtl_lbf_matrix[xqtl_data$sets$cs_index, , drop = F]
+        xqtl_lbf_matrix <- xqtl_lbf_matrix[xqtl_data$sets$cs_index, , drop = FALSE]
     } else if (!is.null(filter_lbf_cs_secondary)) {
         xqtl_lbf_filter_index <- get_filter_lbf_index(xqtl_data, coverage = filter_lbf_cs_secondary) 
-        xqtl_lbf_matrix <- xqtl_lbf_matrix[xqtl_lbf_filter_index,, drop = F]
+        xqtl_lbf_matrix <- xqtl_lbf_matrix[xqtl_lbf_filter_index,, drop = FALSE]
     } else {
-      if ("V" %in% names(xqtl_data)) xqtl_lbf_matrix <- xqtl_lbf_matrix[xqtl_data$V > prior_tol, , drop = F] else (message("No V found in orginal data."))
+      if ("V" %in% names(xqtl_data)) xqtl_lbf_matrix <- xqtl_lbf_matrix[xqtl_data$V > prior_tol, , drop = FALSE] else (message("No V found in original data."))
     }
     if (nrow(combined_gwas_lbf_matrix) > 0 && nrow(xqtl_lbf_matrix) > 0) {
       if (!is.null(xqtl_varname_obj)) colnames(xqtl_lbf_matrix) <- get_nested_element(xqtl_raw_data, xqtl_varname_obj)
