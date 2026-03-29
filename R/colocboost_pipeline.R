@@ -646,7 +646,6 @@ qc_regional_data <- function(region_data,
         sumstat <- sumstats[[ii]]
         if (nrow(sumstat$sumstats) == 0) next
         n <- sumstat$n
-        var_y <- sumstat$var_y
         conditions_sumstat <- names(sumstats)[ii]
         pip_cutoff_to_skip_ld <- if (conditions_sumstat %in% names(pip_cutoff_to_skip_sumstat)) {
           as.numeric(pip_cutoff_to_skip_sumstat[conditions_sumstat])

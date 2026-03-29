@@ -16,11 +16,11 @@ calc_I2 <- function(Q, Est) {
 #' @param gwas_sumstats_db A data frame containing summary statistics from GWAS studies. It should include columns for variant id and their associated statistics such as beta coefficients and standard errors.
 #' @param sets A character string indicating the method used to define sets of genetic variants. Defaults to "sets". This parameter is used to specify the type of sets to extract from the 'susie_result' object.
 #' @param coverage A character string specifying the coverage threshold for credible sets, used when 'sets' is not "sets". Defaults to "coverage_0.95", indicating a 95% coverage credible set.
-#' @param allele_qc Optional. A logical value indicating whether allele qc should be performed on the variants. When TRUE, allele qc are applied to the variants based on the GWAS summary statistics database ('gwas_sumstats_db').
+#' @param run_allele_qc Whether to run allele QC on variants. Default TRUE.
 #' @return A data frame formatted for MR analysis or NULL if cs_list is empty.
 #' @importFrom stringr str_remove
 #' @export
-mr_format <- function(susie_result, condition, gwas_sumstats_db, coverage = "cs_coverage_0.95", allele_qc = TRUE,
+mr_format <- function(susie_result, condition, gwas_sumstats_db, coverage = "cs_coverage_0.95", run_allele_qc = TRUE,
                       molecular_name_obj = c("susie_results", condition, "region_info", "region_name"), ld_meta_df) {
   # Create null mr_format_input
   create_null_mr_input <- function(gene_name) {
@@ -75,7 +75,7 @@ mr_format <- function(susie_result, condition, gwas_sumstats_db, coverage = "cs_
         }
         gwas_sumstats_db_beta_se <- z_to_beta_se(gwas_sumstats_db_extracted_imputed$z, gwas_sumstats_db_extracted_imputed$effect_allele_frequency, gwas_sumstats_db_extracted_imputed$n_sample)
         gwas_sumstats_db_extracted_imputed <- gwas_sumstats_db_extracted_imputed %>% mutate(beta = gwas_sumstats_db_beta_se$beta, se = gwas_sumstats_db_beta_se$se)
-        if (allele_qc) {
+        if (run_allele_qc) {
           susie_cs_result_formatted <- allele_qc(cbind(variant_id_to_df(susie_cs_result_formatted$variant), susie_cs_result_formatted),
             gwas_sumstats_db_extracted_imputed$variant_id, c("bhat_x"),
             match_min_prop = 0
