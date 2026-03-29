@@ -39,11 +39,11 @@ colocboost_analysis_pipeline <- function(region_data,
                                          # - sumstat QC
                                          keep_indel = TRUE,
                                          pip_cutoff_to_skip_sumstat = 0,
-                                         qc_method = c("slalom", "dentist"),
+                                         qc_method = c("slalom", "dentist", "none"),
                                          impute = TRUE,
                                          impute_opts = list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5, lamb = 0.01),
                                          ...) {
-  # - internel function by filtering events based on event_filters
+  # - internal function by filtering events based on event_filters
   filter_events <- function(events, filters, condition) {
     # filters is a list of filter specifications
     # Each filter spec must have:
@@ -455,7 +455,7 @@ qc_regional_data <- function(region_data,
                              # - sumstat
                              keep_indel = TRUE,
                              pip_cutoff_to_skip_sumstat = 0,
-                             qc_method = c("slalom", "dentist"),
+                             qc_method = c("slalom", "dentist", "none"),
                              impute = TRUE,
                              impute_opts = list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5, lamb = 0.01)) {
   qc_method <- match.arg(qc_method)
@@ -602,7 +602,7 @@ qc_regional_data <- function(region_data,
   summary_stats_qc_multitask <- function(sumstat_data,
                                          keep_indel = TRUE,
                                          pip_cutoff_to_skip_sumstat = 0,
-                                         qc_method = c("slalom", "dentist"),
+                                         qc_method = c("slalom", "dentist", "none"),
                                          impute = TRUE,
                                          impute_opts = list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5, lamb = 0.01)) {
     n_LD <- length(sumstat_data$LD_info)
@@ -652,8 +652,8 @@ qc_regional_data <- function(region_data,
           }
         }
 
-        # Perform quality control - remove
-        if (!is.null(qc_method)) {
+        # Perform quality control - remove outlier variants
+        if (!is.null(qc_method) && qc_method != "none") {
           qc_results <- summary_stats_qc(sumstat$sumstats, LD_data, n = n, method = qc_method)
           sumstat$sumstats <- qc_results$sumstats
           LD_mat <- qc_results$LD_mat
