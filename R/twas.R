@@ -171,7 +171,7 @@ harmonize_twas <- function(twas_weights_data, ld_meta_file_path, gwas_meta_file,
           # Step 5: adjust SuSiE weights based on available variants
           if ("susie_weights" %in% colnames(twas_weights_data[[molecular_id]][["weights"]][[context]])) {
             adjusted_susie_weights <- adjust_susie_weights(twas_weights_data[[molecular_id]],
-              keep_variants = postqc_weight_variants, allele_qc = TRUE,
+              keep_variants = postqc_weight_variants, run_allele_qc = TRUE,
               variable_name_obj = c("variant_names", context),
               susie_obj = c("susie_results", context),
               twas_weights_table = c("weights", context), postqc_weight_variants, match_min_prop = 0
@@ -648,7 +648,7 @@ twas_pipeline <- function(twas_weights_data,
           }
           combined_ld_meta_df <- twas_data_qced_result$ref_panel
           mr_formatted_input <- mr_format(twas_weights_data[[weight_db]], context, twas_data_qced[[weight_db]][["gwas_qced"]][[study]],
-            coverage = mr_coverage_column, allele_qc = TRUE, molecular_name_obj = c("molecular_id"), ld_meta_df = combined_ld_meta_df
+            coverage = mr_coverage_column, run_allele_qc = TRUE, molecular_name_obj = c("molecular_id"), ld_meta_df = combined_ld_meta_df
           )
           if (all(is.na(mr_formatted_input$bhat_y))) {
             # FIXME: after updating gwas beta and se NA problem, mr analysis will be restored

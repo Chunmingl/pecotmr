@@ -1340,7 +1340,7 @@ load_multitask_regional_data <- function(region, # a string of chr:start-end for
       LD_info <- load_LD_matrix(LD_meta_file_path,
         region = association_window,
         extract_coordinates = extract_coordinates,
-        return_genotype = FALSE
+        return_genotype = "auto"
       )
       # extract sumstat information
       conditions <- match_LD_sumstat[[i_ld]]

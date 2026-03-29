@@ -7,7 +7,7 @@
 adjust_susie_weights(
   twas_weights_results,
   keep_variants,
-  allele_qc = TRUE,
+  run_allele_qc = TRUE,
   variable_name_obj = c("susie_results", context, "variant_names"),
   susie_obj = c("susie_results", context, "susie_result_trimmed"),
   twas_weights_table = c("weights", context),
@@ -16,18 +16,26 @@ adjust_susie_weights(
 )
 }
 \arguments{
+\item{twas_weights_results}{A list containing TWAS weight data (nested structure).}
+
 \item{keep_variants}{Vector of variant names to keep.}
 
-\item{allele_qc}{Optional}
+\item{run_allele_qc}{Whether to run allele_qc to align alleles. Default TRUE.}
 
-\item{weight_db_file}{A RDS file containing TWAS weights.}
+\item{variable_name_obj}{Path to variant names in the nested list.}
 
-\item{condition}{specific condition.}
+\item{susie_obj}{Path to susie result in the nested list.}
+
+\item{twas_weights_table}{Path to weights table in the nested list.}
+
+\item{LD_variants}{Vector of LD reference variant IDs for allele QC.}
+
+\item{match_min_prop}{Minimum proportion of matched variants. Default 0.2.}
 }
 \value{
-A list of adjusted xQTL coefficients and remained variants ids
+A list with adjusted_susie_weights and remained_variants_ids.
 }
 \description{
-This function adjusts the SuSiE weights based on a set of intersected variants.
-It subsets various components like lbf_matrix, mu, and scale factors based on these variants.
+Adjusts SuSiE TWAS weights by subsetting to intersected variants and
+optionally running allele QC against LD reference variants.
 }

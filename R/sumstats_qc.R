@@ -107,6 +107,7 @@ rss_basic_qc <- function(sumstats, LD_data, skip_region = NULL, keep_indel = TRU
 #'
 #' @export
 summary_stats_qc <- function(sumstats, LD_data, n = NULL, method = c("slalom", "dentist")) {
+  method <- match.arg(method)
   # assuming sumstats has been allele QC-ed, using rss_basic_qc() function
   LD_extract <- LD_data$LD_matrix[sumstats$variant_id, sumstats$variant_id, drop = FALSE]
   if (method == "dentist") {

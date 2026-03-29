@@ -44,22 +44,26 @@ lbf_to_alpha_vector <- function(lbf, prior_weights = NULL) {
 #' @export
 lbf_to_alpha <- function(lbf) {
   alpha_matrix <- t(apply(as.matrix(lbf), 1, lbf_to_alpha_vector))
-  if (ncol(lbf) == 1) alpha_matrix <- matrix(alpha_matrix, ncol = 1, dimname = list(NULL, colnames(lbf)))
+  if (ncol(lbf) == 1) alpha_matrix <- matrix(alpha_matrix, ncol = 1, dimnames = list(NULL, colnames(lbf)))
   return(alpha_matrix)
 }
 
 #' Adjust SuSiE Weights
 #'
-#' This function adjusts the SuSiE weights based on a set of intersected variants.
-#' It subsets various components like lbf_matrix, mu, and scale factors based on these variants.
+#' Adjusts SuSiE TWAS weights by subsetting to intersected variants and
+#' optionally running allele QC against LD reference variants.
 #'
-#' @param weight_db_file A RDS file containing TWAS weights.
-#' @param condition specific condition.
+#' @param twas_weights_results A list containing TWAS weight data (nested structure).
 #' @param keep_variants Vector of variant names to keep.
-#' @param allele_qc Optional
-#' @return A list of adjusted xQTL coefficients and remained variants ids
+#' @param run_allele_qc Whether to run allele_qc to align alleles. Default TRUE.
+#' @param variable_name_obj Path to variant names in the nested list.
+#' @param susie_obj Path to susie result in the nested list.
+#' @param twas_weights_table Path to weights table in the nested list.
+#' @param LD_variants Vector of LD reference variant IDs for allele QC.
+#' @param match_min_prop Minimum proportion of matched variants. Default 0.2.
+#' @return A list with adjusted_susie_weights and remained_variants_ids.
 #' @export
-adjust_susie_weights <- function(twas_weights_results, keep_variants, allele_qc = TRUE,
+adjust_susie_weights <- function(twas_weights_results, keep_variants, run_allele_qc = TRUE,
                                  variable_name_obj = c("susie_results", context, "variant_names"),
                                  susie_obj = c("susie_results", context, "susie_result_trimmed"),
                                  twas_weights_table = c("weights", context), LD_variants, match_min_prop = 0.2) {
@@ -68,7 +72,7 @@ adjust_susie_weights <- function(twas_weights_results, keep_variants, allele_qc 
   # Normalize to canonical format (with chr prefix)
   twas_weights_variants <- normalize_variant_id(twas_weights_variants)
   # allele flip twas weights matrix variants name
-  if (allele_qc) {
+  if (run_allele_qc) {
     weights_matrix <- get_nested_element(twas_weights_results, twas_weights_table)
     if (!all(c("chrom", "pos", "A2", "A1") %in% colnames(weights_matrix))) {
       weights_matrix <- cbind(parse_variant_id(twas_weights_variants), weights_matrix)

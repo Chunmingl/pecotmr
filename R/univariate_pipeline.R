@@ -114,7 +114,7 @@ univariate_analysis_pipeline <- function(
   # SuSiE analysis with optimization
   message("Fitting SuSiE model on input data with L optimization...")
   base_susie_args <- list(X = X, y = Y, init_L = init_L, max_L = max_L, l_step = l_step, coverage = coverage[1])
-  susie_args <- modifyList(finemapping_extra_opts, base_susie_args) # base args takes precedence
+  susie_args <- modifyList(finemapping_extra_opts, base_susie_args) # modifyList(A, B): B overrides A
   res$susie_fitted <- do.call(susie_wrapper, susie_args)
 
   # Process SuSiE results
@@ -385,16 +385,7 @@ rss_analysis_pipeline <- function(
             signal_cutoff = finemapping_opts$signal_cutoff,
             min_abs_corr = finemapping_opts$min_abs_corr
           )
-          qc_method <- NULL
-          impute <- FALSE
-          if (impute & !is.null(qc_method)) {
-              method_name <- paste0(finemapping_method, "_", toupper(qc_method), "_RAISS_imputed")
-          } else if (!impute & !is.null(qc_method)) {
-              method_name <- paste0(finemapping_method, "_", toupper(qc_method))
-          } else {
-              method_name <- paste0(finemapping_method, "_", "NO_QC")
-          }
-          result_list[[method_name]] <- ser
+          result_list[[paste0(finemapping_method, "_NO_QC")]] <- ser
         }
       } else { # CS = 1 or NA
         finemapping_method <- "single_effect"
@@ -409,16 +400,7 @@ rss_analysis_pipeline <- function(
           signal_cutoff = finemapping_opts$signal_cutoff,
           min_abs_corr = finemapping_opts$min_abs_corr
         )
-        qc_method <- NULL
-        impute <- FALSE
-        if (impute & !is.null(qc_method)) {
-            method_name <- paste0(finemapping_method, "_", toupper(qc_method), "_RAISS_imputed")
-        } else if (!impute & !is.null(qc_method)) {
-            method_name <- paste0(finemapping_method, "_", toupper(qc_method))
-        } else {
-            method_name <- paste0(finemapping_method, "_", "NO_QC")
-        }
-        result_list[[method_name]] <- ser
+        result_list[[paste0(finemapping_method, "_NO_QC")]] <- ser
       }
     result_list[["diagnostics"]] <- block_cs_metrics
     }

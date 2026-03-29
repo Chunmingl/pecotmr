@@ -1,3 +1,19 @@
+#' Build LD/X_ref arguments for colocboost based on data type.
+#'
+#' When LD matrices are genotype X (non-square, rows=samples, cols=variants),
+#' passes them as X_ref to colocboost. Otherwise passes as LD (correlation).
+#'
+#' @param ld_list A list of matrices (correlation R or genotype X).
+#' @param subset Optional index vector to subset ld_list (e.g., from dict_sumstatLD).
+#' @return A named list with either `LD = ...` or `X_ref = ...`.
+#' @noRd
+build_ld_args <- function(ld_list, subset = NULL) {
+  if (!is.null(subset)) ld_list <- ld_list[subset]
+  # Detect: if any matrix is non-square, it's genotype X (samples x variants)
+  is_geno <- any(sapply(ld_list, function(m) nrow(m) != ncol(m)))
+  if (is_geno) list(X_ref = ld_list) else list(LD = ld_list)
+}
+
 #' Multi-trait colocalization analysis pipeline
 #'
 #' This function perform a multi-trait colocalization using ColocBoost
@@ -321,13 +337,13 @@ colocboost_analysis_pipeline <- function(region_data,
     message(paste("====== Performing non-focaled version GWAS-xQTL ColocBoost on", length(Y), "contexts and", length(sumstats), "GWAS. ====="))
     t21 <- Sys.time()
     traits <- c(names(Y), names(sumstats))
+    ld_args <- build_ld_args(LD_mat)
     res_gwas <- tryCatch(
-      colocboost(
-        X = X, Y = Y, sumstat = sumstats, LD = LD_mat,
+      do.call(colocboost, c(list(
+        X = X, Y = Y, sumstat = sumstats,
         dict_YX = dict_YX, dict_sumstatLD = dict_sumstatLD,
         outcome_names = traits, focal_outcome_idx = NULL,
-        output_level = 2, ...
-      ),
+        output_level = 2), ld_args, list(...))),
       error = function(e) {
         message("Joint GWAS ColocBoost failed: ", conditionMessage(e))
         return(NULL)
@@ -346,13 +362,13 @@ colocboost_analysis_pipeline <- function(region_data,
       message(paste("====== Performing focaled version GWAS-xQTL ColocBoost on", length(Y), "contexts and ", current_study, "GWAS. ====="))
       dict <- dict_sumstatLD[i_gwas, ]
       traits <- c(names(Y), current_study)
+      ld_args_sep <- build_ld_args(LD_mat, subset = dict[2])
       res_gwas_separate[[current_study]] <- tryCatch(
-        colocboost(
+        do.call(colocboost, c(list(
           X = X, Y = Y, sumstat = sumstats[dict[1]],
-          LD = LD_mat[dict[2]], dict_YX = dict_YX,
+          dict_YX = dict_YX,
           outcome_names = traits, focal_outcome_idx = length(traits),
-          output_level = 2, ...
-        ),
+          output_level = 2), ld_args_sep, list(...))),
         error = function(e) {
           message("Separate GWAS ColocBoost failed for ", current_study, ": ", conditionMessage(e))
           return(NULL)
@@ -611,10 +627,19 @@ qc_regional_data <- function(region_data,
     for (i in 1:n_LD) {
       LD_data <- sumstat_data$LD_info[[i]]
       sumstats <- sumstat_data$sumstats[[i]]
+      has_genotype <- isTRUE(LD_data$is_genotype)
+
+      # When source is genotype X, derive R only where needed (QC, imputation).
+      # Keep X as primary for colocboost X_ref.
+      LD_data_for_qc <- LD_data
+      if (has_genotype) {
+        LD_data_for_qc$LD_matrix <- compute_LD(LD_data$LD_matrix, method = "sample")
+        LD_data_for_qc$is_genotype <- FALSE
+      }
 
       # Pre-compute LD partition once per block (shared across all GWAS studies)
       if (impute) {
-        LD_matrix_partitioned <- partition_LD_matrix(LD_data)
+        LD_matrix_partitioned <- partition_LD_matrix(LD_data_for_qc)
       }
 
       for (ii in seq_along(sumstats)) {
@@ -629,17 +654,22 @@ qc_regional_data <- function(region_data,
           0
         }
 
-        # Preprocess the input data
-        preprocess_results <- rss_basic_qc(sumstat$sumstats, LD_data, keep_indel = keep_indel)
+        # Preprocess: allele QC + variant subsetting (needs R for [variants, variants] indexing)
+        preprocess_results <- rss_basic_qc(sumstat$sumstats, LD_data_for_qc, keep_indel = keep_indel)
         sumstat$sumstats <- preprocess_results$sumstats
-        LD_mat <- preprocess_results$LD_mat
+        R_mat <- preprocess_results$LD_mat
 
-        # initial PIP checking
+        # Initial PIP checking (uses X when available, R otherwise)
         if (pip_cutoff_to_skip_ld != 0) {
-          pip <- susie_rss_wrapper(z = sumstat$sumstats$z, R = LD_mat, L = 1, n = n)$pip
+          pip_vars <- sumstat$sumstats$variant_id
+          if (has_genotype) {
+            pip <- susie_rss_wrapper(z = sumstat$sumstats$z,
+              X = LD_data$LD_matrix[, pip_vars, drop = FALSE], L = 1, n = n)$pip
+          } else {
+            pip <- susie_rss_wrapper(z = sumstat$sumstats$z, R = R_mat, L = 1, n = n)$pip
+          }
           if (pip_cutoff_to_skip_ld < 0) {
-            # automatically determine the cutoff to use
-            pip_cutoff_to_skip_ld <- 3 * 1 / nrow(LD_mat)
+            pip_cutoff_to_skip_ld <- 3 * 1 / length(pip_vars)
           }
           if (!any(pip > pip_cutoff_to_skip_ld)) {
             message(paste(
@@ -652,35 +682,48 @@ qc_regional_data <- function(region_data,
           }
         }
 
-        # Perform quality control - remove outlier variants
+        # Quality control — remove outlier variants (needs R)
         if (!is.null(qc_method) && qc_method != "none") {
-          qc_results <- summary_stats_qc(sumstat$sumstats, LD_data, n = n, method = qc_method)
+          qc_results <- summary_stats_qc(sumstat$sumstats, LD_data_for_qc, n = n, method = qc_method)
           sumstat$sumstats <- qc_results$sumstats
-          LD_mat <- qc_results$LD_mat
+          R_mat <- qc_results$LD_mat
         }
-        # Perform imputation (LD_matrix_partitioned pre-computed above per LD block)
+        # Imputation (needs R via partitioned LD)
         if (impute) {
-          impute_results <- raiss(LD_data$ref_panel, sumstat$sumstats, LD_matrix_partitioned,
+          impute_results <- raiss(LD_data_for_qc$ref_panel, sumstat$sumstats, LD_matrix_partitioned,
             rcond = impute_opts$rcond,
             R2_threshold = impute_opts$R2_threshold, minimum_ld = impute_opts$minimum_ld, lamb = impute_opts$lamb
           )
           sumstat$sumstats <- impute_results$result_filter
-          LD_mat <- impute_results$LD_mat
+          R_mat <- impute_results$LD_mat
         }
 
-        # - check if LD exist
+        # Store: X subset if genotype source, R otherwise
+        final_vars <- sumstat$sumstats$variant_id
+        if (has_genotype) {
+          missing <- setdiff(final_vars, colnames(LD_data$LD_matrix))
+          if (length(missing) > 0) {
+            stop("BUG: ", length(missing), " QC'd variants not found in genotype matrix X. ",
+                 "First few: ", paste(head(missing, 3), collapse = ", "))
+          }
+          mat_to_store <- LD_data$LD_matrix[, final_vars, drop = FALSE]
+        } else {
+          mat_to_store <- R_mat
+        }
+
+        # Deduplicate: reuse existing matrix if variants match
         if (length(final_LD) == 0) {
-          final_LD <- c(final_LD, list(LD_mat) %>% setNames(conditions_sumstat))
+          final_LD <- c(final_LD, list(mat_to_store) %>% setNames(conditions_sumstat))
           final_sumstats <- c(final_sumstats, list(sumstat) %>% setNames(conditions_sumstat))
           LD_match <- c(LD_match, conditions_sumstat)
         } else {
-          variants <- colnames(LD_mat)
+          variants <- colnames(mat_to_store)
           final_sumstats <- c(final_sumstats, list(sumstat) %>% setNames(conditions_sumstat))
           exist_variants <- lapply(final_LD, colnames)
           if_exist <- sapply(exist_variants, function(v) all(variants == v))
           pos <- which(if_exist)
           if (length(pos) == 0) {
-            final_LD <- c(final_LD, list(LD_mat) %>% setNames(conditions_sumstat))
+            final_LD <- c(final_LD, list(mat_to_store) %>% setNames(conditions_sumstat))
             LD_match <- c(LD_match, conditions_sumstat)
           } else {
             LD_match <- c(LD_match, names(final_LD)[pos[1]])

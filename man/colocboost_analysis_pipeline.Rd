@@ -15,7 +15,7 @@ colocboost_analysis_pipeline(
   pip_cutoff_to_skip_ind = 0,
   keep_indel = TRUE,
   pip_cutoff_to_skip_sumstat = 0,
-  qc_method = c("slalom", "dentist"),
+  qc_method = c("slalom", "dentist", "none"),
   impute = TRUE,
   impute_opts = list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5, lamb = 0.01),
   ...

@@ -324,7 +324,8 @@ resolve_ld_source <- function(path) {
 
   # Peek at first row to determine underlying data type
   meta <- as.data.frame(vroom(path, show_col_types = FALSE, n_max = 1))
-  colnames(meta) <- c("chrom", "start", "end", "path")[seq_len(ncol(meta))]
+  if (ncol(meta) < 4) stop("LD metadata file must have at least 4 columns (chrom, start, end, path): ", path)
+  colnames(meta)[1:4] <- c("chrom", "start", "end", "path")
   raw_path <- gsub(",.*$", "", meta$path[1])  # strip comma-separated bim path
   resolved <- file.path(dirname(path), raw_path)
 

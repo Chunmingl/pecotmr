@@ -138,7 +138,7 @@ allele_qc <- function(target_data, ref_variants, col_to_flip = NULL,
 	match_result <- match_result %>% mutate(strand_unambiguous = TRUE)
   }
 
-  # To keep variants: if it's a strand flip, we will keep those unambigous (because if ambigous, cannot know it's trand / sign flip, so discard all)
+  # To keep variants: if it's a strand flip, we will keep those unambiguous (because if ambiguous, cannot know if it's strand / sign flip, so discard all)
   # or exact match or indel match (ID_match)
   # If not a strand flip, then we will keep those that are exact match / those are sign flip / INDEL matched
   match_result <- match_result %>% mutate(keep = if_else(strand_flip, true = (strand_unambiguous | exact_match | ID_match), false =
