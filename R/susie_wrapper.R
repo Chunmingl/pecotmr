@@ -279,9 +279,9 @@ get_top_variants_idx <- function(susie_output, signal_cutoff) {
     unique() %>%
     sort()
 }
+# Returns a data.frame(variant_idx, cs_idx) with one row per (variant, CS) pair.
+# Variants in multiple CSs get multiple rows.
 #' @noRd
-#' Returns a data.frame(variant_idx, cs_idx) with one row per (variant, CS) pair.
-#' Variants in multiple CSs get multiple rows.
 get_cs_info <- function(susie_output_sets_cs, top_variants_idx) {
   cs_names <- names(susie_output_sets_cs)
   rows <- lapply(top_variants_idx, function(vi) {

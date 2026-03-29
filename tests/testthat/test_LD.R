@@ -429,7 +429,7 @@ test_that("find_intersection_rows errors for non-overlapping regions", {
   # Region entirely outside the dataset
   expect_error(
     find_intersection_rows(genomic_data, 2, 100, 200),
-    "Region of interest is not covered by any rows in the data frame."
+    "No data for chromosome 2"
   )
 })
 
@@ -733,7 +733,7 @@ test_that("validate_block_structure errors on non-block structure", {
   )
 
   expect_error(pecotmr:::validate_block_structure(mat, block_meta, variant_ids),
-               "does not have the expected block structure")
+               "Matrix lacks expected block structure")
 })
 
 # ---- merge_blocks ----

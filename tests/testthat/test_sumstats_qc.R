@@ -286,7 +286,7 @@ test_that("summary_stats_qc with slalom method returns correct structure", {
 
   result <- summary_stats_qc(
     basic_result$sumstats, td$LD_data,
-    n = 10000, var_y = 1, method = "slalom"
+    n = 10000, method = "slalom"
   )
 
   expect_type(result, "list")
@@ -315,7 +315,7 @@ test_that("summary_stats_qc with slalom and no outliers keeps all variants", {
 
   result <- summary_stats_qc(
     basic_result$sumstats, td$LD_data,
-    n = 10000, var_y = 1, method = "slalom"
+    n = 10000, method = "slalom"
   )
   expect_equal(result$outlier_number, 0)
   expect_equal(nrow(result$sumstats), nrow(basic_result$sumstats))
@@ -337,7 +337,7 @@ test_that("summary_stats_qc with dentist method returns correct structure", {
 
   result <- summary_stats_qc(
     basic_result$sumstats, td$LD_data,
-    n = 10000, var_y = 1, method = "dentist"
+    n = 10000, method = "dentist"
   )
 
   expect_type(result, "list")
@@ -364,7 +364,7 @@ test_that("summary_stats_qc with dentist and all outliers returns empty", {
 
   result <- summary_stats_qc(
     basic_result$sumstats, td$LD_data,
-    n = 10000, var_y = 1, method = "dentist"
+    n = 10000, method = "dentist"
   )
   expect_equal(nrow(result$sumstats), 0)
   expect_equal(result$outlier_number, nrow(basic_result$sumstats))
@@ -385,7 +385,7 @@ test_that("summary_stats_qc returns LD_mat matching filtered sumstats dimensions
 
   result <- summary_stats_qc(
     basic_result$sumstats, td$LD_data,
-    n = 10000, var_y = 1, method = "slalom"
+    n = 10000, method = "slalom"
   )
   expect_equal(nrow(result$LD_mat), nrow(result$sumstats))
   expect_equal(ncol(result$LD_mat), nrow(result$sumstats))
