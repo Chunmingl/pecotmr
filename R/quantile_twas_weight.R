@@ -815,16 +815,20 @@ calculate_xi_correlation <- function(rq_coef_result, tau_range = seq(0.1, 0.9, b
 quantile_twas_weight_pipeline <- function(X, Y, Z = NULL, maf = NULL, region_id = "",
                                           ld_reference_meta_file = NULL, twas_maf_cutoff = 0.01,
                                           ld_clumping = FALSE, ld_pruning = FALSE,
-                                          screen_significant = FALSE,
+                                          screen_significant = TRUE,
                                           quantile_qtl_tau_list = seq(0.05, 0.95, by = 0.05),
                                           quantile_twas_tau_list = seq(0.01, 0.99, by = 0.01),
+                                          screen_method = "qvalue",
                                           screen_threshold = 0.05,
                                           xi_tau_range = seq(0.1, 0.9, by = 0.05),
                                           keep_variants = NULL,
                                           marginal_beta_calculate = TRUE,
                                           twas_weight_calculate = TRUE,
                                           qrank_screen_calculate = TRUE,
-                                          vqtl_calculate = TRUE) {
+                                          vqtl_calculate = TRUE,
+                                          pre_filter_by_pqr = FALSE,
+                                          initial_corr_filter_cutoff = 0.8,
+                                          full_rank_corr_filter_cutoff = seq(0.75, 0.5, by = -0.05)) {
   # Initialize results list
   results <- list()
 
@@ -859,7 +863,7 @@ quantile_twas_weight_pipeline <- function(X, Y, Z = NULL, maf = NULL, region_id 
   if (qrank_screen_calculate) {
     # Step 2: QR screen
     message("Starting QR screen for region ", region_id)
-    p.screen <- qr_screen(X = X, Y = Y, Z = Z, tau.list = quantile_qtl_tau_list, screen_threshold = screen_threshold, screen_method = "qvalue", top_count = 10, top_percent = 15)
+    p.screen <- qr_screen(X = X, Y = Y, Z = Z, tau.list = quantile_qtl_tau_list, screen_threshold = screen_threshold, screen_method = screen_method, top_count = 10, top_percent = 15)
     message(paste0("Number of SNPs after QR screening: ", length(p.screen$sig_SNP_threshold)))
     message("QR screen completed. Screening significant SNPs")
     results$qr_screen_pvalue_df <- p.screen$df_result
@@ -987,52 +991,60 @@ quantile_twas_weight_pipeline <- function(X, Y, Z = NULL, maf = NULL, region_id 
     }
   }
 
-    # Step 7-9: Pre-filter by p_qr, corr_filter, then fit QR model
-    # First attempt: p_qr < 0.05, corr_filter down to 0.5
-    # If still singular: retry with p_qr < 0.01, corr_filter down to 0.2
-    pqr_cutoffs <- list(
-      list(pval = 0.05, corr_thresholds = seq(0.75, 0.5, by = -0.05)),
-      list(pval = 0.01, corr_thresholds = seq(0.75, 0.2, by = -0.05))
-    )
+    # Step 7: Optionally pre-filter variants by raw p_qr
+    if (pre_filter_by_pqr) {
+      pqr_attempts <- list(
+        list(pval = 0.05, full_rank_corr = full_rank_corr_filter_cutoff),
+        list(pval = 0.01, full_rank_corr = full_rank_corr_filter_cutoff)
+      )
+    } else {
+      message("Skipping p_qr pre-filtering, using X_filtered directly...")
+      pqr_attempts <- list(
+        list(pval = NULL, full_rank_corr = full_rank_corr_filter_cutoff)
+      )
+    }
 
     qr_beta_R2_results <- NULL
-    for (attempt in seq_along(pqr_cutoffs)) {
-      pqr_cutoff <- pqr_cutoffs[[attempt]]$pval
-      corr_thresholds <- pqr_cutoffs[[attempt]]$corr_thresholds
+    for (attempt in seq_along(pqr_attempts)) {
+      pqr_cutoff <- pqr_attempts[[attempt]]$pval
+      full_rank_corr <- pqr_attempts[[attempt]]$full_rank_corr
 
-      # Step 7: Pre-filter variants by raw p_qr
-  raw_pvals <- p.screen$pvec[colnames(X_filtered)]
-      sig_raw <- which(raw_pvals < pqr_cutoff)
-      if (length(sig_raw) == 0) {
-        message("No variants with raw p_qr < ", pqr_cutoff, " in region ", region_id)
-        next
-      }
-      if (length(sig_raw) < ncol(X_filtered)) {
-        message("Pre-filtering variants by raw p_qr < ", pqr_cutoff, ": keeping ", length(sig_raw), " out of ", ncol(X_filtered), " variants")
-        X_pqr_filtered <- X_filtered[, sig_raw, drop = FALSE]
+      # Pre-filter by p_qr if enabled
+      if (!is.null(pqr_cutoff)) {
+        raw_pvals <- p.screen$pvec[colnames(X_filtered)]
+        sig_raw <- which(raw_pvals < pqr_cutoff)
+        if (length(sig_raw) == 0) {
+          message("No variants with raw p_qr < ", pqr_cutoff, " in region ", region_id)
+          next
+        }
+        if (length(sig_raw) < ncol(X_filtered)) {
+          message("Pre-filtering variants by raw p_qr < ", pqr_cutoff, ": keeping ", length(sig_raw), " out of ", ncol(X_filtered), " variants")
+          X_for_corr <- X_filtered[, sig_raw, drop = FALSE]
+        } else {
+          X_for_corr <- X_filtered
+        }
       } else {
-        X_pqr_filtered <- X_filtered
-  }
+        X_for_corr <- X_filtered
+      }
 
-  # Step 8: Filter highly correlated SNPs
-  message("Filtering highly correlated SNPs...")
-      if (ncol(X_pqr_filtered) > 1) {
-        filtered <- corr_filter(X_pqr_filtered, 0.8)
-    X.filter <- filtered$X.new
-  } else {
-        X.filter <- X_pqr_filtered
-  }
+      # Step 8: Initial filter of highly correlated SNPs
+      message("Filtering highly correlated SNPs...")
+      if (ncol(X_for_corr) > 1) {
+        filtered <- corr_filter(X_for_corr, initial_corr_filter_cutoff)
+        X.filter <- filtered$X.new
+      } else {
+        X.filter <- X_for_corr
+      }
 
-  # Step 9: Fit QR and get twas weight and R2 for all taus
+      # Step 9: Fit QR and get twas weight and R2 for all taus
       message("Fitting full QR to calculate TWAS weights and pseudo R-squared values...")
-  AssocData <- list(X = X, Y = Y, C = Z, X.filter = X.filter)
+      AssocData <- list(X = X, Y = Y, C = Z, X.filter = X.filter)
       qr_beta_R2_results <- tryCatch(
         {
-          res <- calculate_qr_and_pseudo_R2(AssocData, quantile_twas_tau_list, corr_thresholds = corr_thresholds)
-          res
+          calculate_qr_and_pseudo_R2(AssocData, quantile_twas_tau_list, corr_thresholds = full_rank_corr)
         },
         error = function(e) {
-          message("Attempt ", attempt, " failed (p_qr < ", pqr_cutoff, "): ", e$message)
+          message("Attempt ", attempt, " failed: ", e$message)
           NULL
         }
       )

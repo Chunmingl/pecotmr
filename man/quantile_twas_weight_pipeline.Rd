@@ -14,16 +14,20 @@ quantile_twas_weight_pipeline(
   twas_maf_cutoff = 0.01,
   ld_clumping = FALSE,
   ld_pruning = FALSE,
-  screen_significant = FALSE,
+  screen_significant = TRUE,
   quantile_qtl_tau_list = seq(0.05, 0.95, by = 0.05),
   quantile_twas_tau_list = seq(0.01, 0.99, by = 0.01),
+  screen_method = "qvalue",
   screen_threshold = 0.05,
   xi_tau_range = seq(0.1, 0.9, by = 0.05),
   keep_variants = NULL,
   marginal_beta_calculate = TRUE,
   twas_weight_calculate = TRUE,
   qrank_screen_calculate = TRUE,
-  vqtl_calculate = TRUE
+  vqtl_calculate = TRUE,
+  pre_filter_by_pqr = FALSE,
+  initial_corr_filter_cutoff = 0.8,
+  full_rank_corr_filter_cutoff = seq(0.75, 0.5, by = -0.05)
 )
 }
 \arguments{
