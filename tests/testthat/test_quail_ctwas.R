@@ -235,7 +235,7 @@ test_that("ctwas_bimfile_loader loads 6-column BIM file correctly", {
   expect_true(is.data.frame(result))
   expect_equal(nrow(result), 3)
   expect_equal(ncol(result), 6)
-  expect_equal(colnames(result), c("chrom", "id", "GD", "pos", "alt", "ref"))
+  expect_equal(colnames(result), c("chrom", "id", "GD", "pos", "A1", "A2"))
   # Positions should be preserved
   expect_equal(result$pos, c(100, 200, 300))
 })
@@ -256,7 +256,7 @@ test_that("ctwas_bimfile_loader loads 9-column BIM file correctly", {
   expect_equal(ncol(result), 9)
   expect_equal(
     colnames(result),
-    c("chrom", "id", "GD", "pos", "alt", "ref", "variance", "allele_freq", "n_nomiss")
+    c("chrom", "id", "GD", "pos", "A1", "A2", "variance", "allele_freq", "n_nomiss")
   )
 })
 

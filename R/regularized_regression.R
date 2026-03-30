@@ -352,9 +352,9 @@ mvsusie_weights <- function(mvsusie_fit = NULL, X = NULL, Y = NULL, prior_varian
 
     mvsusie_fit <- mvsusieR::mvsusie(
       X = X, Y = Y, L = L, prior_variance = prior_variance,
-      residual_variance = residual_variance, precompute_covariances = F,
-      compute_objective = T, estimate_residual_variance = F, estimate_prior_variance = T,
-      estimate_prior_method = "EM", approximate = F, ...
+      residual_variance = residual_variance, precompute_covariances = FALSE,
+      compute_objective = TRUE, estimate_residual_variance = FALSE, estimate_prior_variance = TRUE,
+      estimate_prior_method = "EM", approximate = FALSE, ...
     )
   }
   return(mvsusieR::coef.mvsusie(mvsusie_fit)[-1, ])
@@ -382,7 +382,7 @@ glmnet_weights <- function(X, y, alpha) {
   eff.wgt <- matrix(0, ncol = 1, nrow = ncol(X))
   sds <- apply(X, 2, sd)
   keep <- sds != 0 & !is.na(sds)
-  enet <- glmnet::cv.glmnet(x = X[, keep], y = y, alpha = alpha, nfold = 5, intercept = T, standardize = F)
+  enet <- glmnet::cv.glmnet(x = X[, keep], y = y, alpha = alpha, nfold = 5, intercept = TRUE, standardize = FALSE)
   eff.wgt[keep] <- coef(enet, s = "lambda.min")[2:(sum(keep) + 1)]
   return(eff.wgt)
 }
@@ -497,7 +497,7 @@ bayes_r_weights <- function(X, y, Z = NULL, ...) {
 #'
 #' @description
 #'
-#' This function is adapted from those written by Peter Sørensen in the qgg package.
+#' This function is adapted from those written by Peter Sorensen in the qgg package.
 #' The following prior distributions are provided:
 #'
 #' Bayes N: Assigning a Gaussian prior to marker effects implies that the posterior means are the
@@ -510,7 +510,7 @@ bayes_r_weights <- function(X, y, Z = NULL, ...) {
 #' for the marker effects ; variance comes from an inverse-chi-square distribution instead of being fixed. Estimation
 #' via Gibbs sampling.
 #'
-#' Bayes C: uses a “rounded spike” (low-variance Gaussian) at origin many small
+#' Bayes C: uses a "rounded spike" (low-variance Gaussian) at origin many small
 #' effects can contribute to polygenic component, reduces the dimensionality of
 #' the model (makes Gibbs sampling feasible).
 #'

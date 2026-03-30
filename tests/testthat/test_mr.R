@@ -180,7 +180,7 @@ test_that("mr_format returns a dataframe with NAs for zero coverage in top_loci"
   susie_result_mock <- input_data$susie_result
   susie_result_mock[["susie_results"]][[condition]][["top_loci"]][[coverage]] <- rep(0, nrow(susie_result_mock[["susie_results"]][[condition]][["top_loci"]]))
 
-  result <- mr_format(susie_result_mock, condition, input_data$gwas_sumstats_db, coverage = coverage, allele_qc = allele_qc)
+  result <- mr_format(susie_result_mock, condition, input_data$gwas_sumstats_db, coverage = coverage, run_allele_qc = allele_qc)
 
   expect_true(is.data.frame(result))
   expect_true(all(is.na(result[,-1])))
@@ -196,7 +196,7 @@ test_that("mr_format returns a dataframe with NAs with non-existent top_loci", {
   susie_result_mock <- input_data$susie_result
   susie_result_mock[["susie_results"]][[condition]][["top_loci"]] <- list()
 
-  result <- mr_format(susie_result_mock, condition, input_data$gwas_sumstats_db, coverage = coverage, allele_qc = allele_qc)
+  result <- mr_format(susie_result_mock, condition, input_data$gwas_sumstats_db, coverage = coverage, run_allele_qc = allele_qc)
 
   expect_true(is.data.frame(result))
   expect_true(all(is.na(result[,-1])))

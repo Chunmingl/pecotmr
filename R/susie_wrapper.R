@@ -44,36 +44,40 @@ lbf_to_alpha_vector <- function(lbf, prior_weights = NULL) {
 #' @export
 lbf_to_alpha <- function(lbf) {
   alpha_matrix <- t(apply(as.matrix(lbf), 1, lbf_to_alpha_vector))
-  if (ncol(lbf) == 1) alpha_matrix <- matrix(alpha_matrix, ncol = 1, dimname = list(NULL, colnames(lbf)))
+  if (ncol(lbf) == 1) alpha_matrix <- matrix(alpha_matrix, ncol = 1, dimnames = list(NULL, colnames(lbf)))
   return(alpha_matrix)
 }
 
 #' Adjust SuSiE Weights
 #'
-#' This function adjusts the SuSiE weights based on a set of intersected variants.
-#' It subsets various components like lbf_matrix, mu, and scale factors based on these variants.
+#' Adjusts SuSiE TWAS weights by subsetting to intersected variants and
+#' optionally running allele QC against LD reference variants.
 #'
-#' @param weight_db_file A RDS file containing TWAS weights.
-#' @param condition specific condition.
+#' @param twas_weights_results A list containing TWAS weight data (nested structure).
 #' @param keep_variants Vector of variant names to keep.
-#' @param allele_qc Optional
-#' @return A list of adjusted xQTL coefficients and remained variants ids
+#' @param run_allele_qc Whether to run allele_qc to align alleles. Default TRUE.
+#' @param variable_name_obj Path to variant names in the nested list.
+#' @param susie_obj Path to susie result in the nested list.
+#' @param twas_weights_table Path to weights table in the nested list.
+#' @param LD_variants Vector of LD reference variant IDs for allele QC.
+#' @param match_min_prop Minimum proportion of matched variants. Default 0.2.
+#' @return A list with adjusted_susie_weights and remained_variants_ids.
 #' @export
-adjust_susie_weights <- function(twas_weights_results, keep_variants, allele_qc = TRUE,
+adjust_susie_weights <- function(twas_weights_results, keep_variants, run_allele_qc = TRUE,
                                  variable_name_obj = c("susie_results", context, "variant_names"),
                                  susie_obj = c("susie_results", context, "susie_result_trimmed"),
-                                 twas_weights_table = c("weights", context), combined_LD_variants, match_min_prop = 0.2) {
+                                 twas_weights_table = c("weights", context), LD_variants, match_min_prop = 0.2) {
   # Intersect the rownames of weights with keep_variants
   twas_weights_variants <- get_nested_element(twas_weights_results, variable_name_obj)
   # Normalize to canonical format (with chr prefix)
   twas_weights_variants <- normalize_variant_id(twas_weights_variants)
   # allele flip twas weights matrix variants name
-  if (allele_qc) {
+  if (run_allele_qc) {
     weights_matrix <- get_nested_element(twas_weights_results, twas_weights_table)
     if (!all(c("chrom", "pos", "A2", "A1") %in% colnames(weights_matrix))) {
       weights_matrix <- cbind(parse_variant_id(twas_weights_variants), weights_matrix)
     }
-    weights_matrix_qced <- allele_qc(weights_matrix, combined_LD_variants, colnames(weights_matrix)[!colnames(weights_matrix) %in% c(
+    weights_matrix_qced <- allele_qc(weights_matrix, LD_variants, colnames(weights_matrix)[!colnames(weights_matrix) %in% c(
       "chrom",
       "pos", "A2", "A1"
     )], match_min_prop = match_min_prop)
@@ -101,7 +105,7 @@ adjust_susie_weights <- function(twas_weights_results, keep_variants, allele_qc 
   # Convert lbf_matrix to alpha and calculate adjusted xQTL coefficients
   adjusted_xqtl_alpha <- lbf_to_alpha(lbf_matrix_subset)
   adjusted_xqtl_coef <- colSums(adjusted_xqtl_alpha * mu_subset) / x_column_scal_factors_subset
-  # allele_qc now outputs canonical variant_ids (with chr prefix) — no need to add chr
+  # allele_qc now outputs canonical variant_ids (with chr prefix) -- no need to add chr
   return(list(adjusted_susie_weights = adjusted_xqtl_coef, remained_variants_ids = weights_matrix_qced$target_data_qced$variant_id))
 }
 
@@ -135,60 +139,49 @@ susie_wrapper <- function(X, y, init_L = 5, max_L = 30, l_step = 5, ...) {
 
 #' Wrapper Function for SuSiE RSS with Dynamic L Adjustment
 #'
-#' This function performs SuSiE RSS analysis, dynamically adjusting the number of causal configurations (L)
-#' and applying quality control and imputation as necessary. It includes the total phenotypic variance `var_y`
-#' as one of its parameters to align with the `susie_rss` function's interface.
+#' Performs SuSiE RSS analysis with dynamic L adjustment. Supports both
+#' z+R (correlation matrix) and z+X (genotype matrix) interfaces.
 #'
 #' @param z Z score vector.
-#' @param R LD matrix.
-#' @param var_y Total phenotypic variance.
-#' @param n Sample size; if NULL, certain functionalities that require sample size will be skipped.
-#' @param L Initial number of causal configurations to consider.
-#' @param max_L Maximum number of causal configurations to consider.
+#' @param R LD correlation matrix. Mutually exclusive with X.
+#' @param X Genotype matrix (samples x variants). Mutually exclusive with R.
+#'   When provided, susie_rss uses the low-rank X interface.
+#' @param n Sample size.
+#' @param L Initial number of causal configurations.
+#' @param max_L Maximum number of causal configurations.
 #' @param l_step Step size for increasing L when the limit is reached.
-#' @param ... Extra parameters to pass to the susie_rss function.
+#' @param stochastic_ld_sample Stochastic LD parameter passed to susie_rss.
+#'   NULL (default): no variance inflation. TRUE: infer sketch size from X
+#'   (requires X, not R). Integer: explicit sketch size (for R only).
+#' @param ... Extra parameters passed to susie_rss (e.g., var_y, coverage).
 #' @return SuSiE RSS fit object after dynamic L adjustment
 #' @importFrom susieR susie_rss
 #' @export
-susie_rss_wrapper <- function(z, R, n = NULL, var_y = NULL, L = 10, max_L = 30, l_step = 5,
-                              coverage = 0.95, ...) {
-  original_n <- length(z)
-  keep_indices <- seq_len(original_n)
+susie_rss_wrapper <- function(z, R = NULL, X = NULL, n = NULL,
+                              L = 10, max_L = 30, l_step = 5,
+                              coverage = 0.95,
+                              stochastic_ld_sample = NULL, ...) {
+  # Validate: exactly one of R or X
+  if (is.null(R) && is.null(X)) stop("Either R or X must be provided.")
+  if (!is.null(R) && !is.null(X)) stop("Only one of R or X should be provided, not both.")
 
-  if (any(is.na(R))) {
-    na_variants <- rowSums(is.na(R)) > 0 | colSums(is.na(R)) > 0
-    if (all(na_variants)) {
-      stop("All variants have NAs in LD matrix. Cannot proceed with analysis.")
-    }
-    keep_variants <- !na_variants
-    keep_indices <- which(keep_variants)
-    R <- R[keep_variants, keep_variants, drop = FALSE]
-    z <- z[keep_variants]
-    warning(paste("Removed", sum(na_variants), "variants with NAs in LD matrix. Remaining:", length(z)))
-  }
+  # Build argument list for susie_rss
+  base_args <- list(z = z, n = n, L = L, coverage = coverage,
+                    stochastic_ld_sample = stochastic_ld_sample, ...)
+  if (!is.null(X)) base_args$X <- X else base_args$R <- R
 
-  if (!isSymmetric(R)) {
-    warning("R matrix is not symmetric; forcing symmetry with (R + t(R))/2")
-    R <- (R + t(R)) / 2
-  }
+  run_susie <- function(args) do.call(susie_rss, args)
 
   if (L == 1) {
-    result <- susie_rss(
-      z = z, R = R, var_y = var_y, n = n,
-      L = 1, max_iter = 1, coverage = coverage, ...
-    )
+    base_args$max_iter <- 1
+    result <- run_susie(base_args)
   } else if (L == max_L) {
-    result <- susie_rss(
-      z = z, R = R, var_y = var_y, n = n, L = L,
-      coverage = coverage, ...
-    )
+    result <- run_susie(base_args)
   } else {
     while (TRUE) {
       st <- proc.time()
-      result <- susie_rss(
-        z = z, R = R, var_y = var_y, n = n, L = L,
-        coverage = coverage, ...
-      )
+      base_args$L <- L
+      result <- run_susie(base_args)
       result$time_elapsed <- proc.time() - st
       if (!is.null(result$sets$cs) && length(result$sets$cs) >= L && L <= max_L) {
         L <- L + l_step
@@ -198,138 +191,87 @@ susie_rss_wrapper <- function(z, R, n = NULL, var_y = NULL, L = 10, max_L = 30, 
     }
   }
 
-  # Expand PIP back to original length if variants were dropped,
-  # and remap credible set indices to original positions.
-  if (length(keep_indices) < original_n) {
-    full_pip <- rep(0, original_n)
-    full_pip[keep_indices] <- result$pip
-    result$pip <- full_pip
-    if (!is.null(result$sets$cs)) {
-      result$sets$cs <- lapply(result$sets$cs, function(cs) keep_indices[cs])
-    }
-  }
-
-  return(result)
+  result
 }
 
 #' Run the SuSiE RSS pipeline
 #'
-#' This function runs the SuSiE RSS pipeline, performing analysis based on the specified method.
-#' It processes the input summary statistics and LD data to provide results in a structured output.
+#' Runs SuSiE RSS analysis with the specified method. Supports both z+R
+#' (correlation matrix) and z+X (genotype matrix) interfaces.
 #'
-#' @param sumstats A list or data frame containing summary statistics with 'z' or 'beta' and 'se' columns.
-#' @param LD_mat The LD matrix.
-#' @param n Sample size (default: NULL).
-#' @param var_y Variance of Y (default: NULL).
-#' @param L Initial number of causal configurations to consider in the analysis (default: 5).
-#' @param max_L Maximum number of causal configurations to consider in the analysis (default: 30).
-#' @param l_step Step size for increasing L when the limit is reached during dynamic adjustment (default: 5).
-#' @param analysis_method The analysis method to use. Options are "susie_rss", "single_effect", or "bayesian_conditional_regression" (default: "susie_rss").
-#' @param coverage Coverage level for susie_rss analysis (default: 0.95).
-#' @param secondary_coverage Secondary coverage levels for susie_rss analysis (default: c(0.7, 0.5)).
-#' @param signal_cutoff Signal cutoff for susie_post_processor (default: 0.1).
-#' @param min_abs_corr Minimum absolute correlation for credible set purity filtering (default: 0.8).
-#'
-#' @return A list containing the results of the SuSiE RSS analysis based on the specified method.
-#'
-#' @details The `susie_rss_pipeline` function runs the SuSiE RSS pipeline based on the specified analysis method.
-#'   It takes the following main inputs:
-#'   - `sumstats`: A list or data frame containing summary statistics with 'z' or 'beta' and 'se' columns.
-#'   - `LD_mat`: The LD matrix.
-#'   - `n`: Sample size (optional).
-#'   - `var_y`: Variance of Y (optional).
-#'   - `L`: Initial number of causal configurations to consider in the analysis.
-#'   - `max_L`: Maximum number of causal configurations to consider in the analysis.
-#'   - `l_step`: Step size for increasing L when the limit is reached during dynamic adjustment.
-#'   - `analysis_method`: The analysis method to use. Options are "susie_rss", "single_effect", or "bayesian_conditional_regression".
-
-#'   The function first checks if the `sumstats` input contains 'z' or 'beta' and 'se' columns. If 'z' is present, it is used directly.
-#'   If 'beta' and 'se' are present, 'z' is calculated as 'beta' divided by 'se'.
-#'
-#'   Based on the specified `analysis_method`, the function calls the `susie_rss_wrapper` with the appropriate parameters.
-#'   - For "single_effect" method, `L` is set to 1.
-#'   - For "susie_rss" and "bayesian_conditional_regression" methods, `L`, `max_L`, and `l_step` are used.
-#'   - For "bayesian_conditional_regression" method, `max_iter` is set to 1.
-#'
-#'   The results are then post-processed using the `susie_post_processor` function with the specified `signal_cutoff` and `secondary_coverage` values.
-#'
-#'   The function returns a list containing the results of the SuSiE RSS analysis based on the specified method.
-#'
+#' @param sumstats Data frame with 'z' or ('beta' and 'se') columns.
+#' @param LD_mat LD correlation matrix. Mutually exclusive with X_mat.
+#' @param X_mat Genotype matrix (samples x variants). Mutually exclusive with LD_mat.
+#' @param n Sample size.
+#' @param L Initial number of causal configurations (default: 5).
+#' @param max_L Maximum number of causal configurations (default: 30).
+#' @param l_step Step size for dynamic L adjustment (default: 5).
+#' @param analysis_method One of "susie_rss", "single_effect", "bayesian_conditional_regression".
+#' @param coverage Coverage level (default: 0.95).
+#' @param secondary_coverage Secondary coverage levels (default: c(0.7, 0.5)).
+#' @param signal_cutoff PIP cutoff for susie_post_processor (default: 0.1).
+#' @param min_abs_corr Minimum absolute correlation for CS purity (default: 0.8).
+#' @param stochastic_ld_sample Passed to susie_rss. NULL, TRUE, or integer.
+#' @param ... Additional parameters passed to susie_rss (e.g., var_y).
+#' @return A list with post-processed SuSiE RSS results.
 #' @importFrom magrittr %>%
 #' @importFrom dplyr arrange select
 #' @export
-susie_rss_pipeline <- function(sumstats, LD_mat, n = NULL, var_y = NULL, L = 5, max_L = 30, l_step = 5,
+susie_rss_pipeline <- function(sumstats, LD_mat = NULL, X_mat = NULL, n = NULL,
+                               L = 5, max_L = 30, l_step = 5,
                                analysis_method = c("susie_rss", "single_effect", "bayesian_conditional_regression"),
                                coverage = 0.95,
                                secondary_coverage = c(0.7, 0.5),
                                signal_cutoff = 0.1,
-                               min_abs_corr = 0.8) {
-  # Check if sumstats has z-scores or (beta and se)
+                               min_abs_corr = 0.8,
+                               stochastic_ld_sample = NULL, ...) {
+  analysis_method <- match.arg(analysis_method)
+
   if (!is.null(sumstats$z)) {
     z <- sumstats$z
   } else if (!is.null(sumstats$beta) && !is.null(sumstats$se)) {
     z <- sumstats$beta / sumstats$se
   } else {
-    stop("sumstats should have 'z' or ('beta' and 'se') columns")
+    stop("sumstats must have 'z' or ('beta' and 'se') columns.")
   }
 
-  # Perform analysis based on the specified method
+  # Common args for susie_rss_wrapper
+  common <- list(z = z, n = n, coverage = coverage,
+                 stochastic_ld_sample = stochastic_ld_sample, ...)
+  if (!is.null(X_mat)) common$X <- X_mat else common$R <- LD_mat
+
   if (analysis_method == "single_effect") {
-    res <- susie_rss_wrapper(z = z, R = LD_mat, L = 1, n = n, var_y = var_y, coverage = coverage)
-  } else if (analysis_method == "susie_rss") {
-    res <- susie_rss_wrapper(z = z, R = LD_mat, n = n, var_y = var_y, L = L, max_L = max_L, l_step = l_step, coverage = coverage)
+    res <- do.call(susie_rss_wrapper, c(common, list(L = 1)))
   } else if (analysis_method == "bayesian_conditional_regression") {
-    res <- susie_rss_wrapper(z = z, R = LD_mat, n = n, var_y = var_y, L = L, max_L = max_L, l_step = l_step, max_iter = 1, coverage = coverage)
+    res <- do.call(susie_rss_wrapper, c(common, list(L = L, max_L = max_L, l_step = l_step, max_iter = 1)))
   } else {
-    stop("Invalid analysis method. Choose from 'susie_rss', 'single_effect', or 'bayesian_conditional_regression'")
+    res <- do.call(susie_rss_wrapper, c(common, list(L = L, max_L = max_L, l_step = l_step)))
   }
 
-  # Post-process the results
+  # For post-processing, need a square matrix (R or computed from X).
+  # For mixture panels (list of X), use the first panel to compute R.
+  if (!is.null(LD_mat)) {
+    data_x <- LD_mat
+  } else if (is.list(X_mat) && !is.matrix(X_mat)) {
+    data_x <- compute_LD(X_mat[[1]][, seq_along(z), drop = FALSE], method = "sample")
+  } else {
+    data_x <- compute_LD(X_mat[, seq_along(z), drop = FALSE], method = "sample")
+  }
+
   res <- susie_post_processor(res,
-    data_x = LD_mat, data_y = list(z = z),
+    data_x = data_x, data_y = list(z = z),
     signal_cutoff = signal_cutoff, secondary_coverage = secondary_coverage,
     min_abs_corr = min_abs_corr, mode = "susie_rss"
   )
-
-  return(res)
+  res
 }
 
 #' @noRd
 get_cs_index <- function(snps_idx, susie_cs) {
-  # Use pmap to iterate over each vector in susie_cs
-  idx_lengths <- tryCatch(
-    {
-      pmap(list(x = susie_cs), function(x) {
-        # Check if snps_idx is in the CS and return the length of the CS if it is
-        if (snps_idx %in% x) {
-          return(length(x))
-        } else {
-          return(NA_integer_)
-        }
-      }) %>% unlist()
-    },
-    error = function(e) NA_integer_
-  )
-  idx <- which(!is.na(idx_lengths))
-  # idx length should be either 1 or 0
-  # But in some rare cases there will be a convergence issue resulting in a variant belong to multiple CS
-  # In which case we will keep one of them, with a warning
-  if (length(idx) > 0) {
-    if (length(idx) > 1) {
-      smallest_cs_idx <- which.min(idx_lengths[idx])
-      selected_cs <- idx[smallest_cs_idx]
-      selected_length <- idx_lengths[selected_cs]
-
-      warning(sprintf(
-        "Variable %d found in multiple CS: %s. Keeping smallest: CS %d (length %d).",
-        snps_idx, paste(idx, collapse = ", "), selected_cs, selected_length
-      ))
-      idx <- selected_cs # Keep index with smallest length
-    }
-    return(idx)
-  } else {
-    return(NA_integer_)
-  }
+  # Return ALL CS indices that contain this variant (not just one)
+  idx <- which(vapply(susie_cs, function(x) snps_idx %in% x, logical(1)))
+  if (length(idx) == 0) return(NA_integer_)
+  return(idx)
 }
 #' @noRd
 get_top_variants_idx <- function(susie_output, signal_cutoff) {
@@ -337,12 +279,22 @@ get_top_variants_idx <- function(susie_output, signal_cutoff) {
     unique() %>%
     sort()
 }
+# Returns a data.frame(variant_idx, cs_idx) with one row per (variant, CS) pair.
+# Variants in multiple CSs get multiple rows.
 #' @noRd
 get_cs_info <- function(susie_output_sets_cs, top_variants_idx) {
-  cs_info_pri <- map_int(top_variants_idx, ~ get_cs_index(.x, susie_output_sets_cs))
-  ifelse(is.na(cs_info_pri), 0, as.numeric(str_replace(names(susie_output_sets_cs)[cs_info_pri], "L", "")))
+  cs_names <- names(susie_output_sets_cs)
+  rows <- lapply(top_variants_idx, function(vi) {
+    idx <- get_cs_index(vi, susie_output_sets_cs)
+    if (length(idx) == 1 && is.na(idx)) {
+      data.frame(variant_idx = vi, cs_idx = 0L, stringsAsFactors = FALSE)
+    } else {
+      cs_nums <- as.integer(str_replace(cs_names[idx], "L", ""))
+      data.frame(variant_idx = rep(vi, length(cs_nums)), cs_idx = cs_nums, stringsAsFactors = FALSE)
+    }
+  })
+  do.call(rbind, rows)
 }
-
 #' @noRd
 get_cs_and_corr <- function(susie_output, coverage, data_x, mode = c("susie", "susie_rss", "mvsusie"), min_abs_corr = NULL) {
   if (mode %in% c("susie", "mvsusie")) {
@@ -434,30 +386,34 @@ susie_post_processor <- function(susie_output, data_x, data_y, X_scalar, y_scala
   if (length(eff_idx) > 0) {
     # Prepare for top loci table
     top_variants_idx_pri <- get_top_variants_idx(susie_output, signal_cutoff)
-    cs_pri <- get_cs_info(susie_output$sets$cs, top_variants_idx_pri)
+    # get_cs_info returns data.frame(variant_idx, cs_idx) with one row per (variant, CS) pair
+    top_loci_pri <- get_cs_info(susie_output$sets$cs, top_variants_idx_pri)
+    if (is.null(top_loci_pri)) top_loci_pri <- data.frame(variant_idx = integer(0), cs_idx = integer(0))
     susie_output$cs_corr <- if (mode %in% c("susie", "mvsusie")) get_cs_correlation(susie_output, X = data_x) else get_cs_correlation(susie_output, Xcorr = data_x)
-    top_loci_list <- list("coverage_0.95" = data.frame(variant_idx = top_variants_idx_pri, cs_idx = cs_pri, stringsAsFactors = FALSE))
+    top_loci_list <- list("coverage_0.95" = top_loci_pri)
 
-    ## Loop over each secondary coverage value
+    ## Loop over each secondary coverage value independently
     sets_secondary <- list()
     if (!is.null(secondary_coverage) && length(secondary_coverage)) {
       for (sec_cov in secondary_coverage) {
         sets_secondary[[paste0("coverage_", sec_cov)]] <- get_cs_and_corr(susie_output, sec_cov, data_x, mode, min_abs_corr)
         top_variants_idx_sec <- get_top_variants_idx(sets_secondary[[paste0("coverage_", sec_cov)]], signal_cutoff)
-        cs_sec <- get_cs_info(sets_secondary[[paste0("coverage_", sec_cov)]]$sets$cs, top_variants_idx_sec)
-        top_loci_list[[paste0("coverage_", sec_cov)]] <- data.frame(variant_idx = top_variants_idx_sec, cs_idx = cs_sec, stringsAsFactors = FALSE)
+        top_loci_sec <- get_cs_info(sets_secondary[[paste0("coverage_", sec_cov)]]$sets$cs, top_variants_idx_sec)
+        if (is.null(top_loci_sec)) top_loci_sec <- data.frame(variant_idx = integer(0), cs_idx = integer(0))
+        top_loci_list[[paste0("coverage_", sec_cov)]] <- top_loci_sec
       }
     }
 
-    # Iterate over the remaining tables, rename and merge them
+    # Merge coverage tables via full_join
     names(top_loci_list[[1]])[2] <- paste0("cs_", names(top_loci_list)[1])
     top_loci <- top_loci_list[[1]]
     if (length(top_loci_list) > 1) {
       for (i in 2:length(top_loci_list)) {
         names(top_loci_list[[i]])[2] <- paste0("cs_", names(top_loci_list)[i])
-        top_loci <- full_join(top_loci, top_loci_list[[i]], by = "variant_idx")
+        top_loci <- dplyr::full_join(top_loci, top_loci_list[[i]], by = "variant_idx")
       }
     }
+
     if (nrow(top_loci) > 0) {
       top_loci[is.na(top_loci)] <- 0
       variants <- res$variant_names[top_loci$variant_idx]

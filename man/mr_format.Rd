@@ -9,7 +9,7 @@ mr_format(
   condition,
   gwas_sumstats_db,
   coverage = "cs_coverage_0.95",
-  allele_qc = TRUE,
+  run_allele_qc = TRUE,
   molecular_name_obj = c("susie_results", condition, "region_info", "region_name"),
   ld_meta_df
 )
@@ -23,7 +23,7 @@ mr_format(
 
 \item{coverage}{A character string specifying the coverage threshold for credible sets, used when 'sets' is not "sets". Defaults to "coverage_0.95", indicating a 95% coverage credible set.}
 
-\item{allele_qc}{Optional. A logical value indicating whether allele qc should be performed on the variants. When TRUE, allele qc are applied to the variants based on the GWAS summary statistics database ('gwas_sumstats_db').}
+\item{run_allele_qc}{Whether to run allele QC on variants. Default TRUE.}
 
 \item{sets}{A character string indicating the method used to define sets of genetic variants. Defaults to "sets". This parameter is used to specify the type of sets to extract from the 'susie_result' object.}
 }

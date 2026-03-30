@@ -6,38 +6,43 @@
 \usage{
 susie_rss_wrapper(
   z,
-  R,
+  R = NULL,
+  X = NULL,
   n = NULL,
-  var_y = NULL,
   L = 10,
   max_L = 30,
   l_step = 5,
   coverage = 0.95,
+  stochastic_ld_sample = NULL,
   ...
 )
 }
 \arguments{
 \item{z}{Z score vector.}
 
-\item{R}{LD matrix.}
+\item{R}{LD correlation matrix. Mutually exclusive with X.}
 
-\item{n}{Sample size; if NULL, certain functionalities that require sample size will be skipped.}
+\item{X}{Genotype matrix (samples x variants). Mutually exclusive with R.
+When provided, susie_rss uses the low-rank X interface.}
 
-\item{var_y}{Total phenotypic variance.}
+\item{n}{Sample size.}
 
-\item{L}{Initial number of causal configurations to consider.}
+\item{L}{Initial number of causal configurations.}
 
-\item{max_L}{Maximum number of causal configurations to consider.}
+\item{max_L}{Maximum number of causal configurations.}
 
 \item{l_step}{Step size for increasing L when the limit is reached.}
 
-\item{...}{Extra parameters to pass to the susie_rss function.}
+\item{stochastic_ld_sample}{Stochastic LD parameter passed to susie_rss.
+NULL (default): no variance inflation. TRUE: infer sketch size from X
+(requires X, not R). Integer: explicit sketch size (for R only).}
+
+\item{...}{Extra parameters passed to susie_rss (e.g., var_y, coverage).}
 }
 \value{
 SuSiE RSS fit object after dynamic L adjustment
 }
 \description{
-This function performs SuSiE RSS analysis, dynamically adjusting the number of causal configurations (L)
-and applying quality control and imputation as necessary. It includes the total phenotypic variance `var_y`
-as one of its parameters to align with the `susie_rss` function's interface.
+Performs SuSiE RSS analysis with dynamic L adjustment. Supports both
+z+R (correlation matrix) and z+X (genotype matrix) interfaces.
 }

@@ -4,29 +4,54 @@
 \alias{load_LD_matrix}
 \title{Load and Process Linkage Disequilibrium (LD) Matrix}
 \usage{
-load_LD_matrix(LD_meta_file_path, region, extract_coordinates = NULL)
+load_LD_matrix(
+  LD_meta_file_path,
+  region,
+  extract_coordinates = NULL,
+  return_genotype = FALSE,
+  n_sample = NULL
+)
 }
 \arguments{
-\item{LD_meta_file_path}{path of LD_metadata, LD_metadata is a data frame specifying LD blocks with
-columns "chrom", "start", "end", and "path". "start" and "end" denote the positions of LD blocks.
-"path" is the path of each LD block, optionally including bim file paths.}
+\item{LD_meta_file_path}{Path to the LD metadata TSV file.}
 
-\item{region}{A data frame specifying region of interest with columns "chrom", "start", and "end".}
+\item{region}{Region of interest: "chr:start-end" string or data.frame with chrom/start/end.}
 
-\item{extract_coordinates}{Optional data frame with columns "chrom" and "pos" for specific coordinates extraction.}
+\item{extract_coordinates}{Optional data.frame with columns "chrom" and "pos" for
+specific coordinates extraction (only for pre-computed LD blocks).}
+
+\item{return_genotype}{Controls what LD_matrix contains in the return value.
+FALSE (default): always return correlation matrix R.
+TRUE: return genotype matrix X (only valid for PLINK sources).
+"auto": return X for PLINK sources, R for pre-computed sources.}
+
+\item{n_sample}{Optional sample size for computing variance (= 2*p*(1-p)*n/(n-1)).
+If NULL, ref_panel will not include variance or n_nomiss columns.
+Only used for PLINK genotype sources.}
 }
 \value{
-A list of processed LD matrices and associated variant data frames for region of interest.
-Each element of the list contains:
+A list with:
 \describe{
-\item{combined_LD_variants}{A data frame merging selected variants within each LD block in bim file format with columns "chrom", "variants",
-"GD", "pos", "A1", and "A2".}
-\item{combined_LD_matrix}{The LD matrix for each region, with row and column names matching variant identifiers.}
-\item{block_indices}{A data frame tracking the indices of variants in the combined matrix by LD block,
-with columns "block_id", "start_idx", "end_idx", "chrom", "block_start", "block_end" to facilitate
-further partitioning if needed.}
+  \item{LD_variants}{Character vector of variant IDs (canonical format).}
+  \item{LD_matrix}{LD correlation matrix R (or genotype matrix X when return_genotype is TRUE or "auto" with PLINK source).}
+  \item{ref_panel}{Data.frame with variant metadata (chrom, pos, A2, A1, variant_id,
+    and optionally allele_freq, variance, n_nomiss).}
+  \item{is_genotype}{Logical: TRUE if LD_matrix contains genotype X, FALSE if correlation R.}
+  \item{block_metadata}{Data.frame with region/block info. For pre-computed LD: one row per block.
+    For PLINK: a single row spanning the loaded region.}
 }
 }
 \description{
-Load and Process Linkage Disequilibrium (LD) Matrix
+Unified entry point for loading LD data from a metadata TSV file.
+}
+\details{
+The metadata TSV must have columns: chrom, start, end, path. Two formats:
+\itemize{
+  \item Pre-computed LD blocks: many rows per chromosome with block boundaries
+    in start/end and path pointing to .cor.xz files (optionally comma-separated
+    with a .bim path).
+  \item PLINK genotype files: one row per chromosome with start=0, end=0, and
+    path pointing to a per-chromosome PLINK prefix (.pgen/.pvar[.zst]/.psam or
+    .bed/.bim/.fam). LD is computed on the fly via \code{compute_LD()}.
+}
 }

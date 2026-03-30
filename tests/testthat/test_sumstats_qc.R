@@ -41,8 +41,8 @@ make_test_sumstats_ld <- function(n_variants = 5, chrom_val = 1, with_indels = F
   )
 
   LD_data <- list(
-    combined_LD_variants = ref_panel,
-    combined_LD_matrix   = LD_mat,
+    LD_variants = ref_panel,
+    LD_matrix   = LD_mat,
     ref_panel            = ref_panel
   )
 
@@ -55,7 +55,7 @@ make_test_sumstats_ld <- function(n_variants = 5, chrom_val = 1, with_indels = F
 
 test_that("rss_basic_qc requires correct columns", {
   sumstats <- data.frame(beta = 1, se = 0.5)
-  LD_data <- list(combined_LD_variants = data.frame())
+  LD_data <- list(LD_variants = data.frame())
   expect_error(rss_basic_qc(sumstats, LD_data), "Missing columns")
 })
 
@@ -85,8 +85,8 @@ test_that("rss_basic_qc processes matching variants correctly", {
   )
 
   LD_data <- list(
-    combined_LD_variants = ref_panel,
-    combined_LD_matrix = LD_mat
+    LD_variants = ref_panel,
+    LD_matrix = LD_mat
   )
 
   result <- rss_basic_qc(sumstats, LD_data)
@@ -117,9 +117,9 @@ test_that("rss_basic_qc with skip_region preserves non-skipped variants", {
   expect_true(300 %in% remaining_pos)
 })
 
-test_that("rss_basic_qc with remove_indels=TRUE removes indel variants", {
+test_that("rss_basic_qc with keep_indel=FALSE removes indel variants", {
   td <- make_test_sumstats_ld(n_variants = 5, with_indels = TRUE)
-  result <- rss_basic_qc(td$sumstats, td$LD_data, remove_indels = TRUE)
+  result <- rss_basic_qc(td$sumstats, td$LD_data, keep_indel = FALSE)
   expect_type(result, "list")
   expect_lte(nrow(result$sumstats), nrow(td$sumstats))
 })
@@ -150,8 +150,8 @@ test_that("rss_basic_qc errors when no variants overlap", {
   )
 
   LD_data <- list(
-    combined_LD_variants = ref_panel,
-    combined_LD_matrix   = LD_mat
+    LD_variants = ref_panel,
+    LD_matrix   = LD_mat
   )
 
   expect_error(rss_basic_qc(sumstats, LD_data), "No overlapping|No matching")
@@ -184,8 +184,8 @@ test_that("rss_basic_qc aligns variant IDs by stripping build suffix", {
   )
 
   LD_data <- list(
-    combined_LD_variants = ref_panel,
-    combined_LD_matrix   = LD_mat
+    LD_variants = ref_panel,
+    LD_matrix   = LD_mat
   )
 
   result <- rss_basic_qc(sumstats, LD_data)
@@ -219,8 +219,8 @@ test_that("rss_basic_qc handles chr prefix differences during alignment", {
   )
 
   LD_data <- list(
-    combined_LD_variants = ref_panel,
-    combined_LD_matrix   = LD_mat
+    LD_variants = ref_panel,
+    LD_matrix   = LD_mat
   )
 
   result <- rss_basic_qc(sumstats, LD_data)
@@ -237,10 +237,10 @@ test_that("rss_basic_qc output LD_mat has same dimension as sumstats rows", {
 
 test_that("rss_basic_qc errors when LD matrix has NULL rownames", {
   td <- make_test_sumstats_ld(n_variants = 3)
-  ld_mat <- td$LD_data$combined_LD_matrix
+  ld_mat <- td$LD_data$LD_matrix
   rownames(ld_mat) <- NULL
   colnames(ld_mat) <- NULL
-  td$LD_data$combined_LD_matrix <- ld_mat
+  td$LD_data$LD_matrix <- ld_mat
 
   expect_error(rss_basic_qc(td$sumstats, td$LD_data), "rownames are NULL|cannot align")
 })
@@ -263,7 +263,7 @@ test_that("rss_basic_qc handles multiple skip regions", {
 
 test_that("summary_stats_qc errors on invalid method", {
   sumstats <- data.frame(variant_id = "1:100:A:G", z = 2.0)
-  LD_data <- list(combined_LD_matrix = matrix(1, 1, 1, dimnames = list("1:100:A:G", "1:100:A:G")))
+  LD_data <- list(LD_matrix = matrix(1, 1, 1, dimnames = list("1:100:A:G", "1:100:A:G")))
   expect_error(summary_stats_qc(sumstats, LD_data, method = "invalid"),
                "Invalid quality control method")
 })
@@ -286,7 +286,7 @@ test_that("summary_stats_qc with slalom method returns correct structure", {
 
   result <- summary_stats_qc(
     basic_result$sumstats, td$LD_data,
-    n = 10000, var_y = 1, method = "slalom"
+    n = 10000, method = "slalom"
   )
 
   expect_type(result, "list")
@@ -315,7 +315,7 @@ test_that("summary_stats_qc with slalom and no outliers keeps all variants", {
 
   result <- summary_stats_qc(
     basic_result$sumstats, td$LD_data,
-    n = 10000, var_y = 1, method = "slalom"
+    n = 10000, method = "slalom"
   )
   expect_equal(result$outlier_number, 0)
   expect_equal(nrow(result$sumstats), nrow(basic_result$sumstats))
@@ -337,7 +337,7 @@ test_that("summary_stats_qc with dentist method returns correct structure", {
 
   result <- summary_stats_qc(
     basic_result$sumstats, td$LD_data,
-    n = 10000, var_y = 1, method = "dentist"
+    n = 10000, method = "dentist"
   )
 
   expect_type(result, "list")
@@ -364,7 +364,7 @@ test_that("summary_stats_qc with dentist and all outliers returns empty", {
 
   result <- summary_stats_qc(
     basic_result$sumstats, td$LD_data,
-    n = 10000, var_y = 1, method = "dentist"
+    n = 10000, method = "dentist"
   )
   expect_equal(nrow(result$sumstats), 0)
   expect_equal(result$outlier_number, nrow(basic_result$sumstats))
@@ -385,7 +385,7 @@ test_that("summary_stats_qc returns LD_mat matching filtered sumstats dimensions
 
   result <- summary_stats_qc(
     basic_result$sumstats, td$LD_data,
-    n = 10000, var_y = 1, method = "slalom"
+    n = 10000, method = "slalom"
   )
   expect_equal(nrow(result$LD_mat), nrow(result$sumstats))
   expect_equal(ncol(result$LD_mat), nrow(result$sumstats))

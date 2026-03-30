@@ -87,7 +87,7 @@ jobs:
 
       - name: Build and export docker containers
         if: ${{ contains(matrix.platform, 'linux') }}
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           load: true
           file: .github/rattler-build_container.df

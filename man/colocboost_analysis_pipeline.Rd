@@ -13,9 +13,9 @@ colocboost_analysis_pipeline(
   separate_gwas = FALSE,
   maf_cutoff = 5e-04,
   pip_cutoff_to_skip_ind = 0,
-  remove_indels = FALSE,
+  keep_indel = TRUE,
   pip_cutoff_to_skip_sumstat = 0,
-  qc_method = c("slalom", "dentist"),
+  qc_method = c("slalom", "dentist", "none"),
   impute = TRUE,
   impute_opts = list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5, lamb = 0.01),
   ...
@@ -50,7 +50,7 @@ individual_data contains the following components if exist
 sumstat_data contains the following components if exist
 \itemize{
   \item sumstats: A list of summary statistics f or the matched LD_info, each sublist contains sumstats, n, var_y from \code{load_rss_data}.
-  \item LD_info: A list of LD information, each sublist contains combined_LD_variants, combined_LD_matrix, ref_panel  \code{load_LD_matrix}.
+  \item LD_info: A list of LD information, each sublist contains LD_variants, LD_matrix, ref_panel  \code{load_LD_matrix}.
 }
 }
 \description{

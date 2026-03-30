@@ -1,3 +1,19 @@
+#' Build LD/X_ref arguments for colocboost based on data type.
+#'
+#' When LD matrices are genotype X (non-square, rows=samples, cols=variants),
+#' passes them as X_ref to colocboost. Otherwise passes as LD (correlation).
+#'
+#' @param ld_list A list of matrices (correlation R or genotype X).
+#' @param subset Optional index vector to subset ld_list (e.g., from dict_sumstatLD).
+#' @return A named list with either `LD = ...` or `X_ref = ...`.
+#' @noRd
+build_ld_args <- function(ld_list, subset = NULL) {
+  if (!is.null(subset)) ld_list <- ld_list[subset]
+  # Detect: if any matrix is non-square, it's genotype X (samples x variants)
+  is_geno <- any(sapply(ld_list, function(m) nrow(m) != ncol(m)))
+  if (is_geno) list(X_ref = ld_list) else list(LD = ld_list)
+}
+
 #' Multi-trait colocalization analysis pipeline
 #'
 #' This function perform a multi-trait colocalization using ColocBoost
@@ -22,7 +38,7 @@
 #' sumstat_data contains the following components if exist
 #' \itemize{
 #'   \item sumstats: A list of summary statistics f or the matched LD_info, each sublist contains sumstats, n, var_y from \code{load_rss_data}.
-#'   \item LD_info: A list of LD information, each sublist contains combined_LD_variants, combined_LD_matrix, ref_panel  \code{load_LD_matrix}.
+#'   \item LD_info: A list of LD information, each sublist contains LD_variants, LD_matrix, ref_panel  \code{load_LD_matrix}.
 #' }
 #'
 #' @export
@@ -37,13 +53,13 @@ colocboost_analysis_pipeline <- function(region_data,
                                          maf_cutoff = 0.0005,
                                          pip_cutoff_to_skip_ind = 0,
                                          # - sumstat QC
-                                         remove_indels = FALSE,
+                                         keep_indel = TRUE,
                                          pip_cutoff_to_skip_sumstat = 0,
-                                         qc_method = c("slalom", "dentist"),
+                                         qc_method = c("slalom", "dentist", "none"),
                                          impute = TRUE,
                                          impute_opts = list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5, lamb = 0.01),
                                          ...) {
-  # - internel function by filtering events based on event_filters
+  # - internal function by filtering events based on event_filters
   filter_events <- function(events, filters, condition) {
     # filters is a list of filter specifications
     # Each filter spec must have:
@@ -185,7 +201,7 @@ colocboost_analysis_pipeline <- function(region_data,
   ####### ========= Filtering events before QC =========== #########
   if (!is.null(event_filters) & !is.null(region_data$individual_data)) {
     Y <- region_data$individual_data$residual_Y
-    Y <- lapply(1:length(Y), function(i) {
+    Y <- lapply(seq_along(Y), function(i) {
       y <- Y[[i]]
       events <- colnames(y)
       condition <- names(Y)[i]
@@ -203,7 +219,7 @@ colocboost_analysis_pipeline <- function(region_data,
   region_data <- qc_regional_data(region_data,
     maf_cutoff = maf_cutoff,
     pip_cutoff_to_skip_ind = pip_cutoff_to_skip_ind,
-    remove_indels = remove_indels,
+    keep_indel = keep_indel,
     pip_cutoff_to_skip_sumstat = pip_cutoff_to_skip_sumstat,
     qc_method = qc_method,
     impute = impute,
@@ -227,7 +243,7 @@ colocboost_analysis_pipeline <- function(region_data,
       Y <- NULL
     }
     if (!is.null(Y)) {
-      Y <- lapply(1:length(Y), function(i) {
+      Y <- lapply(seq_along(Y), function(i) {
         y <- Y[[i]]
         lapply(seq_len(ncol(y)), function(j) y[, j, drop = FALSE] %>% setNames(colnames(y)[j]))
       })
@@ -321,13 +337,13 @@ colocboost_analysis_pipeline <- function(region_data,
     message(paste("====== Performing non-focaled version GWAS-xQTL ColocBoost on", length(Y), "contexts and", length(sumstats), "GWAS. ====="))
     t21 <- Sys.time()
     traits <- c(names(Y), names(sumstats))
+    ld_args <- build_ld_args(LD_mat)
     res_gwas <- tryCatch(
-      colocboost(
-        X = X, Y = Y, sumstat = sumstats, LD = LD_mat,
+      do.call(colocboost, c(list(
+        X = X, Y = Y, sumstat = sumstats,
         dict_YX = dict_YX, dict_sumstatLD = dict_sumstatLD,
         outcome_names = traits, focal_outcome_idx = NULL,
-        output_level = 2, ...
-      ),
+        output_level = 2), ld_args, list(...))),
       error = function(e) {
         message("Joint GWAS ColocBoost failed: ", conditionMessage(e))
         return(NULL)
@@ -346,13 +362,13 @@ colocboost_analysis_pipeline <- function(region_data,
       message(paste("====== Performing focaled version GWAS-xQTL ColocBoost on", length(Y), "contexts and ", current_study, "GWAS. ====="))
       dict <- dict_sumstatLD[i_gwas, ]
       traits <- c(names(Y), current_study)
+      ld_args_sep <- build_ld_args(LD_mat, subset = dict[2])
       res_gwas_separate[[current_study]] <- tryCatch(
-        colocboost(
+        do.call(colocboost, c(list(
           X = X, Y = Y, sumstat = sumstats[dict[1]],
-          LD = LD_mat[dict[2]], dict_YX = dict_YX,
+          dict_YX = dict_YX,
           outcome_names = traits, focal_outcome_idx = length(traits),
-          output_level = 2, ...
-        ),
+          output_level = 2), ld_args_sep, list(...))),
         error = function(e) {
           message("Separate GWAS ColocBoost failed for ", current_study, ": ", conditionMessage(e))
           return(NULL)
@@ -444,7 +460,7 @@ filter_valid_sumstats <- function(sumstats, LD_mat, LD_match, min_variants = 2) 
 #' sumstat_data contains the following components if exist
 #' \itemize{
 #'   \item sumstats: A list of summary statistics for the matched LD_info, each sublist contains sumstats, n, var_y from \code{load_rss_data}.
-#'   \item LD_info: A list of LD information, each sublist contains combined_LD_variants, combined_LD_matrix, ref_panel  \code{load_LD_matrix}.
+#'   \item LD_info: A list of LD information, each sublist contains LD_variants, LD_matrix, ref_panel  \code{load_LD_matrix}.
 #' }
 #'
 #' @noRd
@@ -453,14 +469,14 @@ qc_regional_data <- function(region_data,
                              maf_cutoff = 0.0005,
                              pip_cutoff_to_skip_ind = 0,
                              # - sumstat
-                             remove_indels = FALSE,
+                             keep_indel = TRUE,
                              pip_cutoff_to_skip_sumstat = 0,
-                             qc_method = c("slalom", "dentist"),
+                             qc_method = c("slalom", "dentist", "none"),
                              impute = TRUE,
                              impute_opts = list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5, lamb = 0.01)) {
   qc_method <- match.arg(qc_method)
 
-  # Validate and recycle pip_cutoff_to_skip_ind: scalar → recycled to n_contexts
+  # Validate and recycle pip_cutoff_to_skip_ind: scalar -> recycled to n_contexts
   if (!is.null(region_data$individual_data)) {
     n_ind_contexts <- length(region_data$individual_data$residual_Y)
     if (length(pip_cutoff_to_skip_ind) == 1) {
@@ -470,7 +486,7 @@ qc_regional_data <- function(region_data,
     }
   }
 
-  # Validate pip_cutoff_to_skip_sumstat: scalar → named vector for all studies
+  # Validate pip_cutoff_to_skip_sumstat: scalar -> named vector for all studies
   if (!is.null(region_data$sumstat_data)) {
     all_study_names <- unlist(lapply(region_data$sumstat_data$sumstats, names))
     if (length(pip_cutoff_to_skip_sumstat) == 1 && is.null(names(pip_cutoff_to_skip_sumstat))) {
@@ -487,7 +503,7 @@ qc_regional_data <- function(region_data,
   #### related internal functions
   # Add context names to colname of Y if missing
   add_context_to_Y <- function(res_Y) {
-    res <- lapply(1:length(res_Y), function(iy) {
+    res <- lapply(seq_along(res_Y), function(iy) {
       y <- res_Y[[iy]]
       if (is.null(y)) {
         return(NULL)
@@ -600,9 +616,9 @@ qc_regional_data <- function(region_data,
   #   \item LD_match: A vector of strings to indicating sumstats and LD matching (save space since multiple sumstats may link to the same LD matrix).
   # }
   summary_stats_qc_multitask <- function(sumstat_data,
-                                         remove_indels = FALSE,
+                                         keep_indel = TRUE,
                                          pip_cutoff_to_skip_sumstat = 0,
-                                         qc_method = c("slalom", "dentist"),
+                                         qc_method = c("slalom", "dentist", "none"),
                                          impute = TRUE,
                                          impute_opts = list(rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5, lamb = 0.01)) {
     n_LD <- length(sumstat_data$LD_info)
@@ -611,17 +627,25 @@ qc_regional_data <- function(region_data,
     for (i in 1:n_LD) {
       LD_data <- sumstat_data$LD_info[[i]]
       sumstats <- sumstat_data$sumstats[[i]]
+      has_genotype <- isTRUE(LD_data$is_genotype)
+
+      # When source is genotype X, derive R only where needed (QC, imputation).
+      # Keep X as primary for colocboost X_ref.
+      LD_data_for_qc <- LD_data
+      if (has_genotype) {
+        LD_data_for_qc$LD_matrix <- compute_LD(LD_data$LD_matrix, method = "sample")
+        LD_data_for_qc$is_genotype <- FALSE
+      }
 
       # Pre-compute LD partition once per block (shared across all GWAS studies)
       if (impute) {
-        LD_matrix_partitioned <- partition_LD_matrix(LD_data)
+        LD_matrix_partitioned <- partition_LD_matrix(LD_data_for_qc)
       }
 
-      for (ii in 1:length(sumstats)) {
+      for (ii in seq_along(sumstats)) {
         sumstat <- sumstats[[ii]]
         if (nrow(sumstat$sumstats) == 0) next
         n <- sumstat$n
-        var_y <- sumstat$var_y
         conditions_sumstat <- names(sumstats)[ii]
         pip_cutoff_to_skip_ld <- if (conditions_sumstat %in% names(pip_cutoff_to_skip_sumstat)) {
           as.numeric(pip_cutoff_to_skip_sumstat[conditions_sumstat])
@@ -629,17 +653,22 @@ qc_regional_data <- function(region_data,
           0
         }
 
-        # Preprocess the input data
-        preprocess_results <- rss_basic_qc(sumstat$sumstats, LD_data, remove_indels = remove_indels)
+        # Preprocess: allele QC + variant subsetting (needs R for [variants, variants] indexing)
+        preprocess_results <- rss_basic_qc(sumstat$sumstats, LD_data_for_qc, keep_indel = keep_indel)
         sumstat$sumstats <- preprocess_results$sumstats
-        LD_mat <- preprocess_results$LD_mat
+        R_mat <- preprocess_results$LD_mat
 
-        # initial PIP checking
+        # Initial PIP checking (uses X when available, R otherwise)
         if (pip_cutoff_to_skip_ld != 0) {
-          pip <- susie_rss_wrapper(z = sumstat$sumstats$z, R = LD_mat, L = 1, n = n, var_y = var_y)$pip
+          pip_vars <- sumstat$sumstats$variant_id
+          if (has_genotype) {
+            pip <- susie_rss_wrapper(z = sumstat$sumstats$z,
+              X = LD_data$LD_matrix[, pip_vars, drop = FALSE], L = 1, n = n)$pip
+          } else {
+            pip <- susie_rss_wrapper(z = sumstat$sumstats$z, R = R_mat, L = 1, n = n)$pip
+          }
           if (pip_cutoff_to_skip_ld < 0) {
-            # automatically determine the cutoff to use
-            pip_cutoff_to_skip_ld <- 3 * 1 / nrow(LD_mat)
+            pip_cutoff_to_skip_ld <- 3 * 1 / length(pip_vars)
           }
           if (!any(pip > pip_cutoff_to_skip_ld)) {
             message(paste(
@@ -652,35 +681,48 @@ qc_regional_data <- function(region_data,
           }
         }
 
-        # Perform quality control - remove
-        if (!is.null(qc_method)) {
-          qc_results <- summary_stats_qc(sumstat$sumstats, LD_data, n = n, var_y = var_y, method = qc_method)
+        # Quality control — remove outlier variants (needs R)
+        if (!is.null(qc_method) && qc_method != "none") {
+          qc_results <- summary_stats_qc(sumstat$sumstats, LD_data_for_qc, n = n, method = qc_method)
           sumstat$sumstats <- qc_results$sumstats
-          LD_mat <- qc_results$LD_mat
+          R_mat <- qc_results$LD_mat
         }
-        # Perform imputation (LD_matrix_partitioned pre-computed above per LD block)
+        # Imputation (needs R via partitioned LD)
         if (impute) {
-          impute_results <- raiss(LD_data$ref_panel, sumstat$sumstats, LD_matrix_partitioned,
+          impute_results <- raiss(LD_data_for_qc$ref_panel, sumstat$sumstats, LD_matrix_partitioned,
             rcond = impute_opts$rcond,
             R2_threshold = impute_opts$R2_threshold, minimum_ld = impute_opts$minimum_ld, lamb = impute_opts$lamb
           )
           sumstat$sumstats <- impute_results$result_filter
-          LD_mat <- impute_results$LD_mat
+          R_mat <- impute_results$LD_mat
         }
 
-        # - check if LD exist
+        # Store: X subset if genotype source, R otherwise
+        final_vars <- sumstat$sumstats$variant_id
+        if (has_genotype) {
+          missing <- setdiff(final_vars, colnames(LD_data$LD_matrix))
+          if (length(missing) > 0) {
+            stop("BUG: ", length(missing), " QC'd variants not found in genotype matrix X. ",
+                 "First few: ", paste(head(missing, 3), collapse = ", "))
+          }
+          mat_to_store <- LD_data$LD_matrix[, final_vars, drop = FALSE]
+        } else {
+          mat_to_store <- R_mat
+        }
+
+        # Deduplicate: reuse existing matrix if variants match
         if (length(final_LD) == 0) {
-          final_LD <- c(final_LD, list(LD_mat) %>% setNames(conditions_sumstat))
+          final_LD <- c(final_LD, list(mat_to_store) %>% setNames(conditions_sumstat))
           final_sumstats <- c(final_sumstats, list(sumstat) %>% setNames(conditions_sumstat))
           LD_match <- c(LD_match, conditions_sumstat)
         } else {
-          variants <- colnames(LD_mat)
+          variants <- colnames(mat_to_store)
           final_sumstats <- c(final_sumstats, list(sumstat) %>% setNames(conditions_sumstat))
           exist_variants <- lapply(final_LD, colnames)
           if_exist <- sapply(exist_variants, function(v) all(variants == v))
           pos <- which(if_exist)
           if (length(pos) == 0) {
-            final_LD <- c(final_LD, list(LD_mat) %>% setNames(conditions_sumstat))
+            final_LD <- c(final_LD, list(mat_to_store) %>% setNames(conditions_sumstat))
             LD_match <- c(LD_match, conditions_sumstat)
           } else {
             LD_match <- c(LD_match, names(final_LD)[pos[1]])
@@ -697,7 +739,7 @@ qc_regional_data <- function(region_data,
   if (!is.null(sumstat_data)) {
     # - initial check PIP, qc or impute
     sumstat_data <- summary_stats_qc_multitask(sumstat_data,
-      remove_indels = remove_indels,
+      keep_indel = keep_indel,
       pip_cutoff_to_skip_sumstat = pip_cutoff_to_skip_sumstat,
       qc_method = qc_method,
       impute = impute, impute_opts = impute_opts

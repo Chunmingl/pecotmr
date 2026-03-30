@@ -56,7 +56,7 @@ test_that("QUAIL_pipeline output has required columns", {
   geno <- make_genotype_matrix()
   rs <- make_rank_score()
   result <- QUAIL_pipeline(geno, rs)
-  expected_cols <- c("phenotype_id", "chr", "pos", "alt", "ref",
+  expected_cols <- c("phenotype_id", "chr", "pos", "A1", "A2",
                      "variant_id", "beta", "se", "z", "p", "q", "N")
   expect_true(all(expected_cols %in% colnames(result)))
 })
@@ -284,7 +284,7 @@ test_that("run_linear_regression returns a data frame with expected columns", {
   geno <- make_genotype_matrix(n = 40, p = 3)
   pheno <- make_rank_score(n = 40)
   res <- pecotmr:::run_linear_regression(geno, pheno)
-  expected_cols <- c("phenotype_id", "chr", "pos", "alt", "ref",
+  expected_cols <- c("phenotype_id", "chr", "pos", "A1", "A2",
                      "variant_id", "beta", "se", "z", "p", "q", "N")
   expect_true(all(expected_cols %in% colnames(res)))
   expect_equal(nrow(res), ncol(geno))
