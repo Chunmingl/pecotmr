@@ -51,7 +51,13 @@ read_afreq <- function(prefix) {
     "A2" = "REF", "A1" = "ALT",
     "alt_freq" = "ALT_FREQS", "obs_ct" = "OBS_CT"
   )
-  af <- select(af, chrom, id, A2, A1, alt_freq, obs_ct)
+  cols <- c("chrom", "id", "A2", "A1", "alt_freq", "obs_ct")
+  # Stochastic genotype .afreq includes U_MIN/U_MAX for exact min-max inversion
+  if ("U_MIN" %in% colnames(af)) {
+    af <- rename(af, "u_min" = "U_MIN", "u_max" = "U_MAX")
+    cols <- c(cols, "u_min", "u_max")
+  }
+  af <- select(af, all_of(cols))
   return(af)
 }
 
@@ -123,17 +129,18 @@ load_plink2_data <- function(prefix, region = NULL, keep_indel = TRUE, keep_vari
     variant_info <- merge(variant_info, afreq[, c("id", "alt_freq", "obs_ct")],
                           by = "id", all.x = TRUE, sort = FALSE)
   }
-  # Detect and rescale stochastic genotype (non-integer dosage from rss_ld_sketch)
+  # Detect stochastic genotype (non-integer dosage, e.g., from rss_ld_sketch).
+  # If U_MIN/U_MAX are in .afreq, invert the [0,2] min-max scaling exactly.
   is_stochastic <- !all(X == round(X), na.rm = TRUE)
   if (is_stochastic) {
-    if (!is.null(afreq) && "alt_freq" %in% colnames(variant_info)) {
-      p <- variant_info$alt_freq[match(colnames(X), variant_info$id)]
-      X <- rescale_stochastic_genotype(X, p)
-      message("Stochastic genotype detected: rescaled to match original allele frequencies from .afreq")
+    if ("u_min" %in% colnames(variant_info) && "u_max" %in% colnames(variant_info)) {
+      idx <- match(colnames(X), variant_info$id)
+      X <- invert_minmax_scaling(X, variant_info$u_min[idx], variant_info$u_max[idx])
+      message("Stochastic genotype detected: restored original scale via U_MIN/U_MAX from .afreq")
     } else {
       warning("Non-integer genotype values detected (possible stochastic genotype from rss_ld_sketch). ",
-              "Provide a .afreq file with original allele frequencies to restore proper scaling. ",
-              "Without rescaling, correlation structure is preserved but marginal statistics may be off.")
+              "Provide a .afreq file with U_MIN/U_MAX columns to restore original scale. ",
+              "Without inversion, correlation structure is preserved but U'U/B may not approximate R.")
     }
   }
 
@@ -152,36 +159,29 @@ load_plink2_data <- function(prefix, region = NULL, keep_indel = TRUE, keep_vari
   list(X = X, variant_info = variant_info)
 }
 
-#' Rescale stochastic genotype matrix to match original allele frequency statistics.
+#' Invert min-max [0,2] scaling to recover the original U matrix.
 #'
-#' Stochastic genotype data (e.g., from rss_ld_sketch) is stored as min-max
-#' scaled values in [0,2], which preserves correlation but distorts marginal
-#' statistics. This function rescales each column so that:
-#'   mean(X_j) = 2*p_j  and  sd(X_j) = sqrt(2*p_j*(1-p_j))
-#' where p_j is the original ALT allele frequency.
+#' Stochastic genotype data (from rss_ld_sketch) is stored in PLINK2 pgen
+#' format after min-max scaling: U_scaled = 2 * (U - u_min) / (u_max - u_min).
+#' This function exactly inverts that transform using the stored per-variant
+#' u_min and u_max values from the companion .afreq file.
 #'
-#' The rescaling is an affine transform (standardize then shift/scale),
-#' which preserves correlation: cor(X_rescaled) = cor(X_original).
+#' The recovered U satisfies U'U/B ~ Wishart(B, R)/B, the correct distributional
+#' property for LD-based fine-mapping with dynamic variance tracking.
 #'
-#' @param X Numeric matrix (samples x variants). Columns are variants.
-#' @param p Numeric vector of ALT allele frequencies, one per column of X.
-#'   Must have length equal to ncol(X).
-#' @return Rescaled matrix with same dimensions and correlation structure.
+#' @param X Numeric matrix (B x p) of min-max scaled values in [0, 2].
+#' @param u_min Numeric vector of per-variant minimum values before scaling.
+#' @param u_max Numeric vector of per-variant maximum values before scaling.
+#' @return Matrix of original U values with same dimensions.
 #' @export
-rescale_stochastic_genotype <- function(X, p) {
-  if (length(p) != ncol(X)) {
-    stop("Length of p (", length(p), ") must equal ncol(X) (", ncol(X), ")")
+invert_minmax_scaling <- function(X, u_min, u_max) {
+  if (length(u_min) != ncol(X) || length(u_max) != ncol(X)) {
+    stop("Length of u_min/u_max (", length(u_min), ") must equal ncol(X) (", ncol(X), ")")
   }
-  target_mean <- 2 * p
-  target_sd <- sqrt(2 * p * (1 - p))
-  col_mean <- colMeans(X, na.rm = TRUE)
-  col_sd <- apply(X, 2, sd, na.rm = TRUE)
-  col_sd[col_sd == 0] <- 1  # avoid division by zero for monomorphic
-  # Step 1: standardize to Z ~ (0, 1)
-  X <- sweep(sweep(X, 2, col_mean, "-"), 2, col_sd, "/")
-  # Step 2: rescale to target moments
-  X <- sweep(sweep(X, 2, target_sd, "*"), 2, target_mean, "+")
-  X
+  denom <- u_max - u_min
+  denom[denom == 0] <- 1  # monomorphic: scaling was identity
+  # Invert: U_original = U_scaled * (u_max - u_min) / 2 + u_min
+  sweep(sweep(X, 2, denom / 2, "*"), 2, u_min, "+")
 }
 
 # ---------- Internal helpers for load_plink2_data ----------

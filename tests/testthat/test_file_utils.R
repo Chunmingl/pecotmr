@@ -1472,73 +1472,63 @@ test_that("load_multitask_regional_data errors with multiple genotypes and no ma
   )
 })
 
-# ---- rescale_stochastic_genotype ----
+# ---- invert_minmax_scaling ----
 
-test_that("rescale_stochastic_genotype restores correct mean and sd", {
+test_that("invert_minmax_scaling exactly recovers original U", {
   set.seed(42)
-  n <- 500   # pseudo-samples
-  p_true <- c(0.3, 0.05, 0.5, 0.01)  # true ALT allele frequencies
-  k <- length(p_true)
+  n <- 500
+  k <- 4
+  # Simulate original U with arbitrary values
+  U_original <- matrix(rnorm(n * k, mean = 0.5, sd = 0.3), n, k)
 
-  # Simulate real genotype G ~ Binomial(2, p) for each variant
-  G <- sapply(p_true, function(p) rbinom(n, 2, p))
+  # Apply the same min-max scaling as rss_ld_sketch
+  u_min <- apply(U_original, 2, min)
+  u_max <- apply(U_original, 2, max)
+  denom <- u_max - u_min
+  U_scaled <- sweep(sweep(U_original, 2, u_min, "-"), 2, denom, "/") * 2
 
-  # Simulate rss_ld_sketch: U = W'G then min-max scale to [0, 2]
-  W <- matrix(rnorm(n * n, 0, 1 / sqrt(n)), n, n)
-  U <- crossprod(W, G)  # (n x k)
-  U_scaled <- apply(U, 2, function(col) {
-    rng <- range(col)
-    2 * (col - rng[1]) / (rng[2] - rng[1])
-  })
-
-  # Verify scaled is in [0, 2] and NOT matching original statistics
+  # Verify scaled is in [0, 2]
   expect_true(all(U_scaled >= 0 & U_scaled <= 2))
-  expect_false(all(abs(colMeans(U_scaled) - 2 * p_true) < 0.1))
 
-  # Rescale
-  X <- rescale_stochastic_genotype(U_scaled, p_true)
+  # Invert
+  U_recovered <- invert_minmax_scaling(U_scaled, u_min, u_max)
 
-  # After rescaling, mean should be 2p and sd should be sqrt(2p(1-p))
-  for (j in seq_len(k)) {
-    expect_equal(mean(X[, j]), 2 * p_true[j], tolerance = 1e-10)
-    expect_equal(sd(X[, j]), sqrt(2 * p_true[j] * (1 - p_true[j])), tolerance = 1e-10)
-  }
+  # Must be exactly the original (up to floating point)
+  expect_equal(U_recovered, U_original, tolerance = 1e-12)
 })
 
-test_that("rescale_stochastic_genotype preserves correlation", {
+test_that("invert_minmax_scaling preserves correlation structure", {
   set.seed(123)
   n <- 200
-  p_true <- c(0.2, 0.4, 0.1)
-
-  # Create correlated genotypes
-  G <- sapply(p_true, function(p) rbinom(n, 2, p))
+  k <- 3
+  # Simulate U = W'G (G is raw, not standardized, matching rss_ld_sketch)
+  G <- sapply(c(0.2, 0.4, 0.1), function(p) rbinom(n, 2, p))
   W <- matrix(rnorm(n * n, 0, 1 / sqrt(n)), n, n)
-  U <- crossprod(W, G)
-  U_scaled <- apply(U, 2, function(col) {
-    rng <- range(col)
-    2 * (col - rng[1]) / (rng[2] - rng[1])
-  })
+  U_original <- crossprod(W, G)
 
-  cor_before <- cor(U_scaled)
-  X <- rescale_stochastic_genotype(U_scaled, p_true)
-  cor_after <- cor(X)
+  # Scale and invert
+  u_min <- apply(U_original, 2, min)
+  u_max <- apply(U_original, 2, max)
+  denom <- u_max - u_min
+  U_scaled <- sweep(sweep(U_original, 2, u_min, "-"), 2, denom, "/") * 2
+  U_recovered <- invert_minmax_scaling(U_scaled, u_min, u_max)
 
-  # Correlation must be identical (affine transform)
-  expect_equal(cor_before, cor_after, tolerance = 1e-10)
+  # Exact recovery
+  expect_equal(U_recovered, U_original, tolerance = 1e-12)
+  # Correlation of recovered U should approximate correlation of G
+  expect_equal(cor(U_recovered)[1,2], cor(G)[1,2], tolerance = 0.15)
 })
 
-test_that("rescale_stochastic_genotype handles monomorphic variant", {
+test_that("invert_minmax_scaling handles monomorphic variant", {
   X <- matrix(c(1.0, 1.0, 1.0, 0.5, 1.0, 1.5), ncol = 2)
-  p <- c(0.5, 0.3)
-  # First column is constant (monomorphic) -- should not error
-  result <- rescale_stochastic_genotype(X, p)
+  u_min <- c(0.5, 0.0)
+  u_max <- c(0.5, 1.0)  # first column is monomorphic
+  result <- invert_minmax_scaling(X, u_min, u_max)
   expect_equal(ncol(result), 2)
-  # Second column should have correct mean
-  expect_equal(mean(result[, 2]), 2 * 0.3, tolerance = 1e-10)
 })
 
-test_that("rescale_stochastic_genotype errors on mismatched p length", {
+test_that("invert_minmax_scaling errors on mismatched lengths", {
   X <- matrix(1:6, ncol = 2)
-  expect_error(rescale_stochastic_genotype(X, c(0.1, 0.2, 0.3)),
-               "Length of p")
+  expect_error(invert_minmax_scaling(X, c(0, 0, 0), c(1, 1, 1)),
+               "Length of u_min")
 })
