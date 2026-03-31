@@ -117,11 +117,24 @@ load_plink2_data <- function(prefix, region = NULL, keep_indel = TRUE, keep_vari
   rownames(X) <- psam$IID
   colnames(X) <- variant_info$id
 
-  # --- Attach allele frequency from .afreq if available ---
+  # --- Attach allele frequency and rescale stochastic genotypes ---
   afreq <- read_afreq(prefix)
   if (!is.null(afreq)) {
     variant_info <- merge(variant_info, afreq[, c("id", "alt_freq", "obs_ct")],
                           by = "id", all.x = TRUE, sort = FALSE)
+  }
+  # Detect and rescale stochastic genotype (non-integer dosage from rss_ld_sketch)
+  is_stochastic <- !all(X == round(X), na.rm = TRUE)
+  if (is_stochastic) {
+    if (!is.null(afreq) && "alt_freq" %in% colnames(variant_info)) {
+      p <- variant_info$alt_freq[match(colnames(X), variant_info$id)]
+      X <- rescale_stochastic_genotype(X, p)
+      message("Stochastic genotype detected: rescaled to match original allele frequencies from .afreq")
+    } else {
+      warning("Non-integer genotype values detected (possible stochastic genotype from rss_ld_sketch). ",
+              "Provide a .afreq file with original allele frequencies to restore proper scaling. ",
+              "Without rescaling, correlation structure is preserved but marginal statistics may be off.")
+    }
   }
 
   # --- Post-filters: indels and variant whitelist ---
@@ -137,6 +150,38 @@ load_plink2_data <- function(prefix, region = NULL, keep_indel = TRUE, keep_vari
   }
 
   list(X = X, variant_info = variant_info)
+}
+
+#' Rescale stochastic genotype matrix to match original allele frequency statistics.
+#'
+#' Stochastic genotype data (e.g., from rss_ld_sketch) is stored as min-max
+#' scaled values in [0,2], which preserves correlation but distorts marginal
+#' statistics. This function rescales each column so that:
+#'   mean(X_j) = 2*p_j  and  sd(X_j) = sqrt(2*p_j*(1-p_j))
+#' where p_j is the original ALT allele frequency.
+#'
+#' The rescaling is an affine transform (standardize then shift/scale),
+#' which preserves correlation: cor(X_rescaled) = cor(X_original).
+#'
+#' @param X Numeric matrix (samples x variants). Columns are variants.
+#' @param p Numeric vector of ALT allele frequencies, one per column of X.
+#'   Must have length equal to ncol(X).
+#' @return Rescaled matrix with same dimensions and correlation structure.
+#' @export
+rescale_stochastic_genotype <- function(X, p) {
+  if (length(p) != ncol(X)) {
+    stop("Length of p (", length(p), ") must equal ncol(X) (", ncol(X), ")")
+  }
+  target_mean <- 2 * p
+  target_sd <- sqrt(2 * p * (1 - p))
+  col_mean <- colMeans(X, na.rm = TRUE)
+  col_sd <- apply(X, 2, sd, na.rm = TRUE)
+  col_sd[col_sd == 0] <- 1  # avoid division by zero for monomorphic
+  # Step 1: standardize to Z ~ (0, 1)
+  X <- sweep(sweep(X, 2, col_mean, "-"), 2, col_sd, "/")
+  # Step 2: rescale to target moments
+  X <- sweep(sweep(X, 2, target_sd, "*"), 2, target_mean, "+")
+  X
 }
 
 # ---------- Internal helpers for load_plink2_data ----------
