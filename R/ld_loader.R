@@ -105,20 +105,37 @@ ld_loader <- function(R_list = NULL, X_list = NULL,
       mat
     }
   } else {
-    # LD_info mode: load .cor.xz files by block index
+    # LD_info mode: load LD blocks by index from file paths
+    # Supports all three formats:
+    #   1. Pre-computed .cor.xz + .bim/.pvar (custom block format)
+    #   2. PLINK1 prefix (.bed/.bim/.fam) — LD computed on the fly
+    #   3. PLINK2 prefix (.pgen/.pvar/.psam) — LD computed on the fly
     if (!is.data.frame(LD_info) || !"LD_file" %in% colnames(LD_info))
       stop("LD_info must be a data.frame with column 'LD_file'.")
 
     loader <- function(g) {
-      ld_file <- LD_info$LD_file[g]
-      # SNP_file is optional; process_LD_matrix auto-detects .bim/.pvar/.pvar.zst
-      snp_file <- if ("SNP_file" %in% colnames(LD_info)) {
-        LD_info$SNP_file[g]
+      ld_path <- LD_info$LD_file[g]
+
+      # Auto-detect format by checking what files exist
+      if (has_plink2_files(ld_path)) {
+        # PLINK2: load genotypes and compute LD
+        geno <- load_genotype_region(ld_path)
+        mat <- compute_LD(geno)
+      } else if (has_plink1_files(ld_path)) {
+        # PLINK1: load genotypes and compute LD
+        geno <- load_genotype_region(ld_path)
+        mat <- compute_LD(geno)
       } else {
-        NULL  # let process_LD_matrix auto-detect
+        # Pre-computed .cor.xz block
+        snp_file <- if ("SNP_file" %in% colnames(LD_info)) {
+          LD_info$SNP_file[g]
+        } else {
+          NULL  # let process_LD_matrix auto-detect .bim/.pvar/.pvar.zst
+        }
+        ld <- process_LD_matrix(ld_path, snp_file)
+        mat <- ld$LD_matrix
       }
-      ld <- process_LD_matrix(ld_file, snp_file)
-      mat <- ld$LD_matrix
+
       if (!is.null(max_variants) && ncol(mat) > max_variants) {
         keep <- sort(sample(ncol(mat), max_variants))
         mat <- mat[keep, keep]
