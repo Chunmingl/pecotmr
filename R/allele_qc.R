@@ -169,10 +169,11 @@ allele_qc <- function(target_data, ref_variants, col_to_flip = NULL,
   result <- match_result[match_result$keep, , drop = FALSE]
 	
   if (remove_dups) {
-	dups <- vec_duplicate_detect(result[, c("chrom", "pos", "variants_id_qced")])
+	dups <- duplicated(result[, c("chrom", "pos", "variants_id_qced")])
 	if (any(dups)) {
+	  n_removed <- sum(dups)
+	  warning(sprintf("Removed %d duplicate variant(s), keeping first occurrence.", n_removed))
 	  result <- result[!dups, , drop = FALSE]
-	  warning("Duplicate variants were removed.")
 	}
   }
 

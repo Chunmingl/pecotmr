@@ -36,7 +36,8 @@ rss_basic_qc <- function(sumstats, LD_data, skip_region = NULL, keep_indel = TRU
 
   if (!is.null(skip_region)) {
     skip_table <- tibble(region = skip_region) %>%
-      separate(region, into = c("chrom", "start", "end"), sep = "[-:]")
+      separate(region, into = c("chrom", "start", "end"), sep = "[-:]") %>%
+      mutate(start = as.integer(start), end = as.integer(end))
 
     skip_variant <- c()
     for (region_index in 1:nrow(skip_table)) {

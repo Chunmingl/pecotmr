@@ -164,12 +164,9 @@ double gigrnd(double p, double a, double b, std::mt19937& rng) {
 
 	double result = rnd / std::sqrt(a / b);
 
-	// Check if the result is zero and replace it with a small value
+	// Guard against exact zero (can happen with extreme parameters)
 	if (result == 0.0) {
 		result = std::numeric_limits<double>::min();
-	}
-	if (result > 1.0) {
-		result = 1.0;
 	}
 
 	return result;
@@ -280,6 +277,9 @@ std::map<std::string, arma::vec> prs_cs_mcmc(double a, double b, double* phi,
 		for (int jj = 0; jj < p; ++jj) {
 			psi(jj) = gigrnd(a - 0.5, 2.0 * delta(jj), n * std::pow(beta(jj), 2) / sigma, rng);
 		}
+		// Clamp psi to [0, 1] — matches original PRS-CS (Ge et al.):
+		// psi[psi>1] = 1.0 (prevents explosive local shrinkage)
+		psi = arma::clamp(psi, 0.0, 1.0);
 
 		if (phi_updt) {
 			std::gamma_distribution<double> gamma_dist_phi(1.0, 1.0 / (*phi + 1.0));
