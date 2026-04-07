@@ -87,8 +87,8 @@ otters_weights <- function(sumstats, LD, n,
     pvals <- pchisq(z^2, df = 1, lower.tail = FALSE)
     for (thr in p_thresholds) {
       selected <- pvals < thr
-      # Weights = marginal effect on correlation scale (z/sqrt(n)) for selected SNPs
-      w <- ifelse(selected, z / sqrt(n), 0)
+      # Weights = clamped marginal correlation (stat$b) for selected SNPs
+      w <- ifelse(selected, stat$b, 0)
       results[[paste0("PT_", thr)]] <- w
     }
   }
@@ -156,6 +156,19 @@ otters_weights <- function(sumstats, LD, n,
 otters_association <- function(weights, gwas_z, LD,
                                combine_method = c("acat", "hmp")) {
   combine_method <- match.arg(combine_method)
+
+  # Validate dimensions
+  p <- length(gwas_z)
+  if (nrow(LD) != p || ncol(LD) != p) {
+    stop(sprintf("LD dimensions (%d x %d) do not match gwas_z length (%d).",
+                 nrow(LD), ncol(LD), p))
+  }
+  for (nm in names(weights)) {
+    if (length(weights[[nm]]) != p) {
+      stop(sprintf("Weight vector '%s' has length %d but gwas_z has length %d.",
+                   nm, length(weights[[nm]]), p))
+    }
+  }
 
   results <- data.frame(
     method = character(),
