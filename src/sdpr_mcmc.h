@@ -148,13 +148,15 @@ MCMC_state(size_t num_snp, size_t max_cluster, \
 	suff_stats.assign(max_cluster, 0);
 	sumsq.assign(max_cluster, 0.0);
 	V.assign(max_cluster, 0.0);
+	// Initialize all SNPs to the null cluster (k=0). The original SDPR
+	// used random initialization (uniform over 0..M-1), but this causes
+	// the first sample_beta() call to allocate an enormous dense matrix
+	// (nearly all SNPs are "causal"), crashing with "Mat::init() too large".
+	// Starting from null is standard MCMC practice and lets the sampler
+	// discover causal assignments organically.
 	cls_assgn.assign(num_snp, 0);
 	std::random_device rd;
 	r.seed(rd());
-	std::uniform_int_distribution<int> dist(0, M-1);
-	for (size_t i=0; i<num_snp; i++) {
-		cls_assgn[i] = dist(r);
-	}
 }
 
 void sample_sigma2();
