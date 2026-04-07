@@ -14,13 +14,11 @@ pval_acat <- function(pvals) {
   if (length(pvals) == 1) {
     return(pvals[1])
   }
-  stat <- 0.00
-  pval_min <- 1.00
-
-  stat <- sum(qcauchy(pvals))
-  pval_min <- min(pval_min, min(qcauchy(pvals)))
-
-  return(pcauchy(stat / length(pvals), lower.tail = FALSE))
+  # ACAT statistic: T = mean(tan(pi*(0.5 - p_i)))
+  # Liu & Xie (2020) "Cauchy combination test"
+  # For very small p, tan(pi*(0.5-p)) ~ 1/(pi*p), so T is large and positive.
+  stat <- mean(tan(pi * (0.5 - pvals)))
+  return(pcauchy(stat, lower.tail = FALSE))
 }
 
 pval_hmp <- function(pvals) {
