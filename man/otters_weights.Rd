@@ -8,8 +8,9 @@ otters_weights(
   sumstats,
   LD,
   n,
-  methods = list(lassosum_rss = list(), prs_cs = list(n_iter = 1000, n_burnin = 500, thin
-    = 5), sdpr = list(iter = 1000, burn = 200, thin = 5, verbose = FALSE)),
+  methods = list(lassosum_rss = list(), prs_cs = list(phi = 1e-04, n_iter = 1000,
+    n_burnin = 500, thin = 5), sdpr = list(iter = 1000, burn = 200, thin = 1, verbose =
+    FALSE)),
   p_thresholds = c(0.001, 0.05)
 )
 }
@@ -26,9 +27,16 @@ is desired.}
 
 \item{methods}{Named list of RSS methods and their extra arguments. Each element
 name must correspond to a \code{*_weights} function in pecotmr (without the
-\code{_weights} suffix). Default: \code{list(lassosum_rss = list(),
-prs_cs = list(n_iter = 1000, n_burnin = 500, thin = 5),
-sdpr = list(iter = 1000, burn = 200, thin = 5, verbose = FALSE))}.}
+\code{_weights} suffix). Defaults match the original OTTERS pipeline
+(Zhang et al. 2024):
+\itemize{
+  \item \code{lassosum_rss}: s grid = c(0.2, 0.5, 0.9, 1.0), lambda from
+    0.0001 to 0.1 (20 values on log scale)
+  \item \code{prs_cs}: phi = 1e-4 (fixed, not learned), 1000 iterations,
+    500 burn-in, thin = 5
+  \item \code{sdpr}: 1000 iterations, 200 burn-in, thin = 1 (no thinning)
+}
+To add learners (e.g., \code{mr_ash_rss}), simply append to this list.}
 
 \item{p_thresholds}{Numeric vector of p-value thresholds for P+T. Set to
 \code{NULL} to skip P+T. Default: \code{c(0.001, 0.05)}.}

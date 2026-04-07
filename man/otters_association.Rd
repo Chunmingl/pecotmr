@@ -11,9 +11,12 @@ otters_association(weights, gwas_z, LD, combine_method = c("acat", "hmp"))
 or any named list of numeric vectors).}
 
 \item{gwas_z}{Numeric vector of GWAS z-scores, same length and order as the
-weights vectors.}
+weights vectors. Must be aligned to the same variants and allele orientation
+as the weights and LD matrix. Use \code{\link{allele_qc}} or
+\code{\link{rss_basic_qc}} for harmonization before calling this function.}
 
-\item{LD}{LD correlation matrix R.}
+\item{LD}{LD correlation matrix R, aligned to the same variants as weights
+and gwas_z.}
 
 \item{combine_method}{Method to combine p-values across methods: \code{"acat"}
 (default) or \code{"hmp"}.}

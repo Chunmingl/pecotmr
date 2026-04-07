@@ -8,7 +8,7 @@ lassosum_rss(
   bhat,
   LD,
   n,
-  lambda = exp(seq(log(0.001), log(0.1), length.out = 20)),
+  lambda = exp(seq(log(1e-04), log(0.1), length.out = 20)),
   thr = 1e-04,
   maxiter = 10000
 )
