@@ -9,28 +9,32 @@ ld_loader(
   X_list = NULL,
   ld_meta_path = NULL,
   regions = NULL,
+  LD_info = NULL,
   return_genotype = FALSE,
   max_variants = NULL
 )
 }
 \arguments{
-\item{R_list}{List of G precomputed LD correlation matrices (p_g x p_g).
-Mutually exclusive with \code{X_list} and \code{ld_meta_path}.}
+\item{R_list}{List of G precomputed LD correlation matrices (p_g x p_g).}
 
-\item{X_list}{List of G genotype matrices (n x p_g). Mutually exclusive
-with \code{R_list} and \code{ld_meta_path}.}
+\item{X_list}{List of G genotype matrices (n x p_g).}
 
 \item{ld_meta_path}{Path to a pecotmr LD metadata TSV file (as used by
-\code{\link{load_LD_matrix}}). Mutually exclusive with \code{R_list}
-and \code{X_list}.}
+\code{\link{load_LD_matrix}}).}
 
 \item{regions}{Character vector of G region strings (e.g.,
 \code{"chr22:17238266-19744294"}). Required when \code{ld_meta_path}
 is used.}
 
-\item{return_genotype}{Logical. When using file mode, return the
+\item{LD_info}{A data.frame with column \code{LD_file} (paths to
+\code{.cor.xz} LD matrix files) and optionally \code{SNP_file}
+(paths to companion \code{.bim} files; defaults to
+\code{paste0(LD_file, ".bim")} if absent). As returned by
+\code{\link{get_ctwas_meta_data}}.}
+
+\item{return_genotype}{Logical. When using region mode, return the
 genotype matrix X (\code{TRUE}) or LD correlation R (\code{FALSE},
-default). Returning X enables low-rank RSS paths in downstream methods.}
+default).}
 
 \item{max_variants}{Integer or \code{NULL}. If set, randomly subsample
 blocks larger than this to control memory usage.}
@@ -45,16 +49,19 @@ demand. This avoids loading all blocks into memory simultaneously,
 which is critical for genome-wide analyses with hundreds of blocks.
 }
 \details{
-Three modes are supported:
+Four modes are supported:
 
 \describe{
   \item{list mode (R)}{Pre-loaded list of LD correlation matrices.
     Simple but uses more memory. Set \code{R_list}.}
   \item{list mode (X)}{Pre-loaded list of genotype matrices (n x p_g).
     Set \code{X_list}.}
-  \item{file mode}{Loads LD from a pecotmr metadata TSV file on the fly
+  \item{region mode}{Loads LD from a pecotmr metadata TSV file on the fly
     via \code{\link{load_LD_matrix}}. Memory-efficient for large datasets.
     Set \code{ld_meta_path} and \code{regions}.}
+  \item{LD_info mode}{Loads pre-computed LD blocks from \code{.cor.xz}
+    files listed in an \code{LD_info} data.frame (as returned by
+    \code{\link{get_ctwas_meta_data}}). Set \code{LD_info}.}
 }
 }
 \examples{

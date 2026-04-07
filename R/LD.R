@@ -127,27 +127,55 @@ get_regional_ld_meta <- function(ld_reference_meta_file, region, complete_covera
 #' @importFrom utils read.table
 #' @importFrom stats setNames
 #' @noRd
-process_LD_matrix <- function(LD_file_path, bim_file_path) {
+process_LD_matrix <- function(LD_file_path, snp_file_path = NULL) {
   # Read .cor.xz matrix
   LD_file_con <- xzfile(LD_file_path)
   LD_matrix <- scan(LD_file_con, quiet = TRUE)
   close(LD_file_con)
   LD_matrix <- matrix(LD_matrix, ncol = sqrt(length(LD_matrix)), byrow = TRUE)
 
-  # Read bim (variant metadata)
-  bim_file_name <- if (!is.null(bim_file_path)) bim_file_path else paste0(LD_file_path, ".bim")
-  LD_variants <- read.table(bim_file_name)
-  col_names <- if (ncol(LD_variants) == 9) {
-    c("chrom", "variants", "GD", "pos", "A1", "A2", "variance", "allele_freq", "n_nomiss")
-  } else if (ncol(LD_variants) == 6) {
-    c("chrom", "variants", "GD", "pos", "A1", "A2")
-  } else {
-    stop("Unexpected number of columns (", ncol(LD_variants), ") in bim file: ", bim_file_name)
+  # Auto-detect variant metadata file: .bim (PLINK1) or .pvar/.pvar.zst (PLINK2)
+  if (is.null(snp_file_path)) {
+    candidates <- paste0(LD_file_path, c(".bim", ".pvar", ".pvar.zst"))
+    found <- candidates[file.exists(candidates)]
+    if (length(found) == 0) stop("No variant file found for: ", LD_file_path,
+                                  " (tried .bim, .pvar, .pvar.zst)")
+    snp_file_path <- found[1]
   }
-  LD_variants <- LD_variants %>%
-    setNames(col_names) %>%
-    mutate(chrom = as.character(as.integer(strip_chr_prefix(chrom))),
-           variants = normalize_variant_id(variants))
+
+  # Detect format by extension or header
+  is_pvar <- grepl("\\.(pvar|pvar\\.zst)$", snp_file_path)
+  if (!is_pvar) {
+    # Check if first line starts with #CHROM (pvar header)
+    first_line <- readLines(snp_file_path, n = 1)
+    is_pvar <- grepl("^#CHROM", first_line)
+  }
+
+  if (is_pvar) {
+    # PLINK2 .pvar format: read via existing read_pvar_text()
+    LD_variants <- read_pvar_text(snp_file_path)
+    # read_pvar_text returns: chrom, id, pos, A2 (REF), A1 (ALT)
+    LD_variants <- LD_variants %>%
+      mutate(chrom = as.character(as.integer(strip_chr_prefix(chrom))),
+             variants = normalize_variant_id(id)) %>%
+      rename(GD = pos)  # reuse pos column for ordering
+    LD_variants$GD <- LD_variants$pos <- as.integer(
+      sapply(LD_variants$variants, function(v) strsplit(v, ":")[[1]][2]))
+  } else {
+    # PLINK1 .bim format
+    LD_variants <- read.table(snp_file_path)
+    col_names <- if (ncol(LD_variants) == 9) {
+      c("chrom", "variants", "GD", "pos", "A1", "A2", "variance", "allele_freq", "n_nomiss")
+    } else if (ncol(LD_variants) == 6) {
+      c("chrom", "variants", "GD", "pos", "A1", "A2")
+    } else {
+      stop("Unexpected number of columns (", ncol(LD_variants), ") in bim file: ", snp_file_path)
+    }
+    LD_variants <- LD_variants %>%
+      setNames(col_names) %>%
+      mutate(chrom = as.character(as.integer(strip_chr_prefix(chrom))),
+             variants = normalize_variant_id(variants))
+  }
 
   # Label and symmetrize the matrix
   colnames(LD_matrix) <- rownames(LD_matrix) <- LD_variants$variants

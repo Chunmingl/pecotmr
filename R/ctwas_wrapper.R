@@ -1,11 +1,3 @@
-#' Utility function to load LD in ctwas analyses, to interface with cTWAS package
-#' @param ld_matrix_file_path A string of file path to the LD matrix.
-#' @export
-ctwas_ld_loader <- function(ld_matrix_file_path) {
-  ld_loaded <- process_LD_matrix(ld_matrix_file_path, paste0(ld_matrix_file_path, ".bim"))
-  ld_loaded <- ld_loaded$LD_matrix
-  return(ld_loaded)
-}
 #' @importFrom vroom vroom
 #' @export
 ctwas_bimfile_loader <- function(bim_file_path) {

@@ -11,7 +11,8 @@ otters_weights(
   methods = list(lassosum_rss = list(), prs_cs = list(phi = 1e-04, n_iter = 1000,
     n_burnin = 500, thin = 5), sdpr = list(iter = 1000, burn = 200, thin = 1, verbose =
     FALSE)),
-  p_thresholds = c(0.001, 0.05)
+  p_thresholds = c(0.001, 0.05),
+  check_ld_method = "eigenfix"
 )
 }
 \arguments{
@@ -40,6 +41,11 @@ To add learners (e.g., \code{mr_ash_rss}), simply append to this list.}
 
 \item{p_thresholds}{Numeric vector of p-value thresholds for P+T. Set to
 \code{NULL} to skip P+T. Default: \code{c(0.001, 0.05)}.}
+
+\item{check_ld_method}{LD quality check method passed to \code{\link{check_ld}}.
+Default \code{"eigenfix"} sets negative eigenvalues to zero (required for
+PRS-CS Cholesky, matching OTTERS' SVD-based PD forcing). Set to \code{NULL}
+to skip checking.}
 }
 \value{
 A named list of weight vectors (one per method). Each vector has length
