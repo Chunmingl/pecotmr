@@ -536,7 +536,12 @@ std::unordered_map<std::string, arma::vec> mcmc(
             state.calc_b(i, data, ldmat_dat);
         }
 
-        // sample_assignment is parallelized across LD blocks
+        // sample_assignment dispatched to thread pool across LD blocks.
+        // NOTE: std::mt19937 is not thread-safe. With n_threads > 1 there
+        // is a data race on MCMC_state::r. This matches the original SDPR
+        // (eldronzhou/SDPR) which has the same issue with gsl_rng. The
+        // default n_threads=1 avoids the race. For safe parallelism, each
+        // block would need its own RNG seeded from the shared one.
         for (size_t i = 0; i < data.ref_ld_mat.size(); i++) {
             func_pool.push(std::bind(&MCMC_state::sample_assignment,
                                      &state, i, ref(data), ref(ldmat_dat)));

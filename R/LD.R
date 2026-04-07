@@ -891,10 +891,12 @@ check_ld <- function(R,
   if (method == "shrink" && !is_pd) {
     R_out <- (1 - shrinkage) * R + shrinkage * diag(p)
     method_applied <- "shrink"
-  } else if (method == "eigenfix" && !is_psd) {
-    # Set negative eigenvalues to zero and reconstruct
-    # (closest PSD matrix in Frobenius norm — susieR approach)
-    vals_fixed <- pmax(vals, 0)
+  } else if (method == "eigenfix" && !is_pd) {
+    # Set negative eigenvalues to a small positive value and reconstruct.
+    # Using r_tol (not zero) ensures the result is strictly positive
+    # definite, which is required by methods that use Cholesky decomposition
+    # (PRS-CS, SDPR). Setting to exactly zero would produce PSD but not PD.
+    vals_fixed <- pmax(vals, r_tol)
     R_out <- eig$vectors %*% diag(vals_fixed) %*% t(eig$vectors)
     # Restore exact symmetry and unit diagonal
     R_out <- (R_out + t(R_out)) / 2

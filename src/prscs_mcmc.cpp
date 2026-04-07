@@ -44,9 +44,12 @@ Rcpp::List prs_cs_rcpp(double a, double b, Rcpp::Nullable<double> phi,
 		ld_blk_vec.push_back(Rcpp::as<arma::mat>(ld_blk[i]));
 	}
 
+	// Use stack variable to avoid heap allocation and memory leak risk.
+	double phi_val = 0.0;
 	double* phi_ptr = nullptr;
 	if (phi.isNotNull()) {
-		phi_ptr = new double(Rcpp::as<double>(phi));
+		phi_val = Rcpp::as<double>(phi);
+		phi_ptr = &phi_val;
 	}
 
 	unsigned int seed_val = 0;
@@ -66,7 +69,5 @@ Rcpp::List prs_cs_rcpp(double a, double b, Rcpp::Nullable<double> phi,
 	result["sigma_est"] = output["sigma_est"](0);
 	result["phi_est"] = output["phi_est"](0);
 
-	// Clean up dynamically allocated memory
-	delete phi_ptr;
 	return result;
 }
