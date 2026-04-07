@@ -823,7 +823,7 @@ bayes_r_rss_weights <- function(sumstats, LD, ...) {
 #' out <- lassosum_rss(bhat, LD, n)
 #' @export
 lassosum_rss <- function(bhat, LD, n,
-                         lambda = exp(seq(log(0.001), log(0.1), length.out = 20)),
+                         lambda = exp(seq(log(0.0001), log(0.1), length.out = 20)),
                          thr = 1e-4, maxiter = 10000) {
   if (!is.list(LD)) {
     stop("Please provide a valid list of LD blocks using 'LD'.")

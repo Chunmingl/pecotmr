@@ -23,9 +23,16 @@
 #' @param n eQTL study sample size (scalar).
 #' @param methods Named list of RSS methods and their extra arguments. Each element
 #'   name must correspond to a \code{*_weights} function in pecotmr (without the
-#'   \code{_weights} suffix). Default: \code{list(lassosum_rss = list(),
-#'   prs_cs = list(n_iter = 1000, n_burnin = 500, thin = 5),
-#'   sdpr = list(iter = 1000, burn = 200, thin = 5, verbose = FALSE))}.
+#'   \code{_weights} suffix). Defaults match the original OTTERS pipeline
+#'   (Zhang et al. 2024):
+#'   \itemize{
+#'     \item \code{lassosum_rss}: s grid = c(0.2, 0.5, 0.9, 1.0), lambda from
+#'       0.0001 to 0.1 (20 values on log scale)
+#'     \item \code{prs_cs}: phi = 1e-4 (fixed, not learned), 1000 iterations,
+#'       500 burn-in, thin = 5
+#'     \item \code{sdpr}: 1000 iterations, 200 burn-in, thin = 1 (no thinning)
+#'   }
+#'   To add learners (e.g., \code{mr_ash_rss}), simply append to this list.
 #' @param p_thresholds Numeric vector of p-value thresholds for P+T. Set to
 #'   \code{NULL} to skip P+T. Default: \code{c(0.001, 0.05)}.
 #'
@@ -46,8 +53,9 @@
 otters_weights <- function(sumstats, LD, n,
                            methods = list(
                              lassosum_rss = list(),
-                             prs_cs = list(n_iter = 1000, n_burnin = 500, thin = 5),
-                             sdpr = list(iter = 1000, burn = 200, thin = 5, verbose = FALSE)
+                             prs_cs = list(phi = 1e-4,
+                                           n_iter = 1000, n_burnin = 500, thin = 5),
+                             sdpr = list(iter = 1000, burn = 200, thin = 1, verbose = FALSE)
                            ),
                            p_thresholds = c(0.001, 0.05)) {
   # Compute z-scores if not present
@@ -63,7 +71,14 @@ otters_weights <- function(sumstats, LD, n,
   z <- sumstats$z
 
   # Build stat object for _weights() convention
-  stat <- list(b = z / sqrt(n), n = rep(n, p))
+  # Safeguard: clamp marginal correlations to (-1, 1) as required by lassosum
+  # (matches OTTERS shrink_factor logic in PRSmodels/lassosum.R lines 71-77)
+  b <- z / sqrt(n)
+  max_abs_b <- max(abs(b))
+  if (max_abs_b >= 1) {
+    b <- b / (max_abs_b / 0.9999)
+  }
+  stat <- list(b = b, n = rep(n, p))
 
   results <- list()
 
@@ -113,8 +128,11 @@ otters_weights <- function(sumstats, LD, n,
 #' @param weights Named list of weight vectors (output from \code{\link{otters_weights}}
 #'   or any named list of numeric vectors).
 #' @param gwas_z Numeric vector of GWAS z-scores, same length and order as the
-#'   weights vectors.
-#' @param LD LD correlation matrix R.
+#'   weights vectors. Must be aligned to the same variants and allele orientation
+#'   as the weights and LD matrix. Use \code{\link{allele_qc}} or
+#'   \code{\link{rss_basic_qc}} for harmonization before calling this function.
+#' @param LD LD correlation matrix R, aligned to the same variants as weights
+#'   and gwas_z.
 #' @param combine_method Method to combine p-values across methods: \code{"acat"}
 #'   (default) or \code{"hmp"}.
 #'

@@ -16,22 +16,21 @@ knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
 The OTTERS pipeline (Zhang et al. 2024) performs TWAS in two stages:
 
 1. **Stage I** (`otters_weights`): Train eQTL weights using multiple
-   summary-statistics-based (RSS) methods — P+T, lassosum, PRS-CS, SDPR,
-   and any additional learner following the `*_weights(stat, LD, ...)` convention.
-2. **Stage II** (`otters_association`): Compute per-method TWAS z-scores via the
-   FUSION formula and combine p-values across methods using ACAT.
+   summary-statistics-based (RSS) methods.
+2. **Stage II** (`otters_association`): Compute per-method TWAS z-scores
+   and combine p-values across methods using ACAT.
 
-This vignette demonstrates the pipeline using simulated data. For real data,
-you would load eQTL summary statistics and LD matrices using pecotmr's
-data loading infrastructure:
+This vignette demonstrates the pipeline using simulated data.
 
-- `load_rss_data()` — load eQTL summary statistics from file
-- `load_LD_matrix()` — load LD correlation matrix from PLINK2 genotypes or
-  pre-computed blocks
-- `compute_LD()` — compute LD from a genotype matrix (with optional shrinkage
-  parameter for lassosum-style regularization)
+**Data loading (not shown here)**: For real data, load eQTL summary
+statistics and LD using pecotmr's infrastructure:
+
+- `load_rss_data()` — load eQTL summary statistics from tabix-indexed files
+- `load_LD_matrix()` — load LD from PLINK2 pgen/pvar/psam or pre-computed blocks
+- `compute_LD()` — compute LD from a genotype matrix, with optional
+  `shrinkage` parameter for lassosum-style regularization
 - `ld_loader()` — create a lazy loader for genome-wide block-by-block processing
-- `rss_basic_qc()` — allele QC, strand flip handling, and variant matching
+- `rss_basic_qc()` / `allele_qc()` — allele harmonization, strand flip handling
 
 ## Simulate data
 
@@ -62,80 +61,88 @@ eqtl_z <- as.vector(cor(expression, X)) * sqrt(n_eqtl)
 eqtl_sumstats <- data.frame(z = eqtl_z)
 
 # Simulate GWAS z-scores (gene has causal effect on trait)
-beta_gwas_on_trait <- 0.05  # gene-level effect on trait
+beta_gwas_on_trait <- 0.05
 gwas_z <- as.numeric(R %*% (beta_eqtl * beta_gwas_on_trait * sqrt(n_gwas))) +
           rnorm(p)
 
 cat("Causal eQTL SNPs:", causal, "\n")
 cat("True eQTL effects:", beta_eqtl[causal], "\n")
-cat("Gene effect on trait:", beta_gwas_on_trait, "\n")
 ```
 
 ## Stage I: Train eQTL weights
 
-`otters_weights()` trains weights using multiple methods simultaneously.
-By default it runs P+T (at p < 0.001 and p < 0.05), lassosum, PRS-CS,
-and SDPR. You can customize which methods to include and pass
-method-specific arguments.
+### Default methods and parameters
+
+`otters_weights()` runs three methods by default, with parameters matching
+the original OTTERS (Zhang et al. 2024):
+
+| Method | Key defaults | Description |
+|--------|-------------|-------------|
+| **P+T** | `p_thresholds = c(0.001, 0.05)` | Select SNPs by eQTL p-value; weights = marginal z/sqrt(n) |
+| **lassosum** | `s = c(0.2, 0.5, 0.9, 1.0)`, `lambda` = 20 values from 1e-4 to 0.1 | L1-penalized regression on summary stats; grid search over shrinkage and penalty |
+| **PRS-CS** | `phi = 1e-4` (fixed), `n_iter = 1000`, `n_burnin = 500`, `thin = 5` | Bayesian continuous shrinkage prior; fixed global shrinkage matches OTTERS default |
+| **SDPR** | `iter = 1000`, `burn = 200`, `thin = 1` | Dirichlet process mixture; no thinning matches OTTERS default |
+
+These defaults are set in the `methods` argument:
+
+```r
+# This is the default — you don't need to type it:
+methods = list(
+  lassosum_rss = list(),
+  prs_cs = list(phi = 1e-4, n_iter = 1000, n_burnin = 500, thin = 5),
+  sdpr = list(iter = 1000, burn = 200, thin = 1, verbose = FALSE)
+)
+```
+
+### Running with defaults
 
 ```{r train, message=FALSE}
 weights <- otters_weights(
   sumstats = eqtl_sumstats,
   LD = R,
-  n = n_eqtl,
-  methods = list(
-    lassosum_rss = list(),
-    prs_cs = list(n_iter = 1000, n_burnin = 500, thin = 5, seed = 42)
-  ),
-  p_thresholds = c(0.001, 0.05)
+  n = n_eqtl
 )
 
-# Summary of trained weights
 for (nm in names(weights)) {
   w <- weights[[nm]]
-  cat(sprintf("%-18s: %d non-zero weights (out of %d)\n",
-              nm, sum(w != 0), length(w)))
-}
-```
-
-### Correlation with true eQTL effects
-
-```{r weight_quality}
-for (nm in names(weights)) {
-  w <- weights[[nm]]
-  if (any(w != 0)) {
-    cat(sprintf("%-18s: cor(weights, truth) = %.4f\n",
-                nm, cor(w, beta_eqtl)))
-  }
+  cr <- if (any(w != 0)) round(cor(w, beta_eqtl), 3) else NA
+  cat(sprintf("%-18s: %2d non-zero weights, cor(w, truth) = %s\n",
+              nm, sum(w != 0), cr))
 }
 ```
 
 ## Stage II: TWAS association testing
 
 `otters_association()` computes per-method TWAS z-scores using the
-FUSION formula $Z_{TWAS} = w^T z / \sqrt{w^T R w}$ and combines
-p-values via ACAT.
+FUSION formula and combines p-values via ACAT:
+
+$$Z_{TWAS} = \frac{w^T z}{\sqrt{w^T R w}}$$
 
 ```{r test}
 twas_results <- otters_association(
   weights = weights,
   gwas_z = gwas_z,
-  LD = R,
-  combine_method = "acat"
+  LD = R
 )
-
 print(twas_results)
 ```
 
-The `ACAT_combined` row aggregates evidence across all methods. This
-omnibus test is the main output of the OTTERS framework — it is more
-powerful than any single method because different methods capture
-different genetic architectures.
+The `ACAT_combined` row aggregates evidence across all methods using the
+Cauchy combination test (Liu & Xie, 2020). This omnibus test is the main
+output of the OTTERS framework — it is more powerful than any single method
+because different methods capture different genetic architectures.
 
 ## Extending with additional learners
 
-Any function following the `*_weights(stat, LD, ...)` convention can
-be added as a learner. For example, to include `mr_ash_rss`:
+Any function following the `*_weights(stat, LD, ...)` convention can be
+added as a learner. No code changes needed — methods are dispatched
+dynamically via `do.call()`.
+
+### Example: adding mr.ash.rss
+
+`mr_ash_rss_weights()` (from susieR's mixture of regressions with adaptive
+shrinkage) is a natural addition — it uses a flexible mixture-of-normals
+prior that can capture both sparse and polygenic architectures:
 
 ```{r extend, eval=FALSE}
 weights <- otters_weights(
@@ -143,17 +150,40 @@ weights <- otters_weights(
   LD = R,
   n = n_eqtl,
   methods = list(
+    # Original OTTERS methods (defaults shown explicitly)
     lassosum_rss = list(),
-    prs_cs = list(n_iter = 1000, n_burnin = 500, thin = 5),
-    sdpr = list(iter = 1000, burn = 200, thin = 5, verbose = FALSE),
-    mr_ash_rss = list(var_y = 1, sigma2_e = 0.5,
-                      s0 = c(0, 0.01, 0.1, 0.5), w0 = rep(0.25, 4))
+    prs_cs = list(phi = 1e-4, n_iter = 1000, n_burnin = 500, thin = 5),
+    sdpr = list(iter = 1000, burn = 200, thin = 1, verbose = FALSE),
+    # Additional learner: mr.ash.rss
+    mr_ash_rss = list(
+      var_y = 1,                            # phenotype variance (1 for standardized)
+      sigma2_e = 0.5,                       # residual variance
+      s0 = c(0, 0.001, 0.01, 0.1, 0.5),    # prior mixture variances
+      w0 = rep(0.2, 5)                      # prior mixture weights (uniform)
+    )
   )
 )
 ```
 
-No code changes are needed — the method is dispatched dynamically via
-`do.call(paste0(method_name, "_weights"), ...)`.
+The `mr_ash_rss` method uses a mixture-of-normals prior with 5
+components (including a point mass at zero), covering a range from
+null to large effects. The `s0` grid and `w0` weights can be tuned,
+but the defaults above are a reasonable starting point for most eQTL
+applications.
+
+### Example: minimal two-method run
+
+For quick analyses or limited compute, you can run just P+T and lassosum:
+
+```{r minimal, eval=FALSE}
+weights <- otters_weights(
+  sumstats = eqtl_sumstats,
+  LD = R,
+  n = n_eqtl,
+  methods = list(lassosum_rss = list()),
+  p_thresholds = c(0.05)
+)
+```
 
 ## Genome-wide usage with ld_loader()
 
@@ -166,13 +196,20 @@ loader <- ld_loader(ld_meta_path = "path/to/ld_meta.tsv",
                     regions = gene_regions)
 
 # Process each gene
-for (g in seq_along(gene_regions)) {
-  R_g <- loader(g)  # loads LD on demand
-
-  weights_g <- otters_weights(eqtl_sumstats_g, R_g, n_eqtl)
-  twas_g <- otters_association(weights_g, gwas_z_g, R_g)
-}
+results_list <- lapply(seq_along(gene_regions), function(g) {
+  R_g <- loader(g)
+  weights_g <- otters_weights(eqtl_sumstats_list[[g]], R_g, n_eqtl)
+  otters_association(weights_g, gwas_z_list[[g]], R_g)
+})
+all_results <- do.call(rbind, results_list)
 ```
+
+## Note on variant alignment
+
+`otters_association()` assumes that weights, GWAS z-scores, and the LD
+matrix are aligned to the same variant set and allele orientation. For
+real data, use `allele_qc()` or `rss_basic_qc()` to harmonize before
+calling the pipeline.
 
 ## References
 
@@ -186,3 +223,5 @@ for (g in seq_along(gene_regions)) {
   continuous shrinkage priors. *Nature Communications*.
 - Zhou et al. (2023). SDPR: a statistical method for leveraging
   summary-level data for polygenic risk prediction.
+- Liu & Xie (2020). Cauchy combination test: a powerful test with
+  analytic p-value calculation. *JASA*.
