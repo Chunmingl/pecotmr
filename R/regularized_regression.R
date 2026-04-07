@@ -851,10 +851,38 @@ lassosum_rss <- function(bhat, LD, n,
   result
 }
 
-#' Extract weights from lassosum_rss function
-#' @return A numeric vector of the posterior SNP coefficients.
+#' Extract weights from lassosum_rss with shrinkage grid search
+#'
+#' Searches over a grid of shrinkage parameters \code{s} (default:
+#' \code{c(0.2, 0.5, 0.9, 1.0)}, matching the original lassosum and OTTERS).
+#' For each \code{s}, the LD matrix is shrunk as \code{(1-s)*R + s*I}, then
+#' \code{lassosum_rss()} is called across the lambda path. The best
+#' \code{(s, lambda)} combination is selected by the lowest objective value.
+#'
+#' @param stat A list with \code{$b} (effect sizes) and \code{$n} (per-variant sample sizes).
+#' @param LD LD correlation matrix R (single matrix, NOT pre-shrunk).
+#' @param s Numeric vector of shrinkage parameters to search over. Default:
+#'   \code{c(0.2, 0.5, 0.9, 1.0)} following Mak et al (2017) and OTTERS.
+#' @param ... Additional arguments passed to \code{lassosum_rss()}.
+#'
+#' @return A numeric vector of the posterior SNP coefficients at the best (s, lambda).
 #' @export
-lassosum_rss_weights <- function(stat, LD, ...) {
-  model <- lassosum_rss(bhat = stat$b, LD = list(blk1 = LD), n = median(stat$n), ...)
-  return(model$beta_est)
+lassosum_rss_weights <- function(stat, LD, s = c(0.2, 0.5, 0.9, 1.0), ...) {
+  n <- median(stat$n)
+  p <- nrow(LD)
+  best_fbeta <- Inf
+  best_beta  <- rep(0, p)
+
+  for (s_val in s) {
+    # Shrink LD: R_s = (1 - s) * R + s * I
+    LD_s <- (1 - s_val) * LD + s_val * diag(p)
+    model <- lassosum_rss(bhat = stat$b, LD = list(blk1 = LD_s), n = n, ...)
+    min_fbeta <- min(model$fbeta)
+    if (min_fbeta < best_fbeta) {
+      best_fbeta <- min_fbeta
+      best_beta  <- model$beta_est
+    }
+  }
+
+  return(best_beta)
 }
