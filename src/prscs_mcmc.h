@@ -215,9 +215,13 @@ std::map<std::string, arma::vec> prs_cs_mcmc(double a, double b, double* phi,
 	arma::vec beta(p, arma::fill::zeros);
 	arma::vec psi(p, arma::fill::ones);
 	double sigma = 1.0;
+	// Use stack variable to avoid heap allocation and potential memory leak.
+	// If phi is NULL (learn from data), use phi_local on the stack and point
+	// phi to it. If phi is provided, phi_local is unused.
+	double phi_local = 1.0;
 	bool phi_updt = (phi == nullptr);
 	if (phi_updt) {
-		phi = new double(1.0);
+		phi = &phi_local;
 	}
 
 	arma::vec beta_est(p, arma::fill::zeros);
@@ -293,9 +297,7 @@ std::map<std::string, arma::vec> prs_cs_mcmc(double a, double b, double* phi,
 		}
 	}
 
-	if (phi_updt) {
-		delete phi;
-	}
+	// No delete needed — phi_local is on the stack.
 
 	// Convert standardized beta to per-allele beta only if not all maf are zeros
 	arma::vec maf_vec(maf);
