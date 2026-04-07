@@ -35,6 +35,10 @@
 #'   To add learners (e.g., \code{mr_ash_rss}), simply append to this list.
 #' @param p_thresholds Numeric vector of p-value thresholds for P+T. Set to
 #'   \code{NULL} to skip P+T. Default: \code{c(0.001, 0.05)}.
+#' @param check_ld_method LD quality check method passed to \code{\link{check_ld}}.
+#'   Default \code{"eigenfix"} sets negative eigenvalues to zero (required for
+#'   PRS-CS Cholesky, matching OTTERS' SVD-based PD forcing). Set to \code{NULL}
+#'   to skip checking.
 #'
 #' @return A named list of weight vectors (one per method). Each vector has length
 #'   equal to \code{nrow(sumstats)}. P+T results are named \code{PT_<threshold>}.
@@ -57,7 +61,21 @@ otters_weights <- function(sumstats, LD, n,
                                            n_iter = 1000, n_burnin = 500, thin = 5),
                              sdpr = list(iter = 1000, burn = 200, thin = 1, verbose = FALSE)
                            ),
-                           p_thresholds = c(0.001, 0.05)) {
+                           p_thresholds = c(0.001, 0.05),
+                           check_ld_method = "eigenfix") {
+  # Check and optionally repair LD matrix quality
+  # PRS-CS requires positive-definite LD for Cholesky; OTTERS forces PD via SVD.
+  # Default "eigenfix" sets negative eigenvalues to 0 (susieR approach).
+  # Set to NULL to skip (e.g., if LD is known to be clean).
+  if (!is.null(check_ld_method)) {
+    ld_check <- check_ld(LD, method = check_ld_method)
+    if (ld_check$method_applied != "none") {
+      message(sprintf("check_ld: repaired LD via '%s' (min eigenvalue was %.2e, %d negative).",
+                      ld_check$method_applied, ld_check$min_eigenvalue, ld_check$n_negative))
+    }
+    LD <- ld_check$R
+  }
+
   # Compute z-scores if not present
   if (is.null(sumstats$z)) {
     if (!is.null(sumstats$beta) && !is.null(sumstats$se)) {
