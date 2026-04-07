@@ -102,6 +102,28 @@ test_that("prs_cs works without maf (maf = NULL)", {
   expect_equal(length(result$beta_est), p)
 })
 
+# ---- prs_cs signal recovery ----
+test_that("prs_cs recovers signal direction on simulated genotype data", {
+  set.seed(42)
+  n <- 500
+  p <- 20
+  X <- matrix(rbinom(n * p, 2, 0.3), nrow = n)
+  beta_true <- rep(0, p)
+  beta_true[c(3, 10, 15)] <- c(0.4, -0.3, 0.2)
+  y <- X %*% beta_true + rnorm(n)
+  bhat <- as.vector(cor(y, X))
+  R <- cor(X)
+  result <- prs_cs(bhat = bhat, LD = list(blk1 = R), n = n,
+                   n_iter = 1000, n_burnin = 500, thin = 5, seed = 42)
+  expect_true("beta_est" %in% names(result))
+  expect_equal(length(result$beta_est), p)
+  expect_true(all(is.finite(result$beta_est)))
+  # Sigma should be reasonable (near 1 for standardized data)
+  expect_true(result$sigma_est > 0.1 && result$sigma_est < 10)
+  # Correlation with truth should be positive (signal recovery)
+  expect_gt(cor(result$beta_est, beta_true), 0.5)
+})
+
 # ---- prs_cs_weights (wrapper) ----
 test_that("prs_cs_weights calls prs_cs and returns beta_est", {
   set.seed(42)
