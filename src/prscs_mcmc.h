@@ -259,7 +259,11 @@ std::map<std::string, arma::vec> prs_cs_mcmc(double a, double b, double* phi,
 		double err = std::max(n / 2.0 * (1.0 - 2.0 * arma::dot(beta, beta_mrg) + quad),
 		                      n / 2.0 * arma::sum(arma::pow(beta, 2) / psi));
 
-		sigma = 1.0 / gamma_dist_sigma(rng) / err;
+		// Original PRS-CS (Ge et al.): sigma = 1/Gamma((n+p)/2, scale=1/err)
+		// = InvGamma((n+p)/2, rate=err), i.e. mean = err/((n+p)/2-1).
+		// gamma_dist_sigma samples X ~ Gamma((n+p)/2, scale=1), so
+		// sigma = err/X gives the correct InvGamma(a, rate=err).
+		sigma = err / gamma_dist_sigma(rng);
 
 		arma::vec delta = arma::vec(p);
 		for (int jj = 0; jj < p; ++jj) {
