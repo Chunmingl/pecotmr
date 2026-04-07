@@ -783,3 +783,104 @@ extract_block_matrices <- function(matrix, block_metadata, variant_ids) {
     block_metadata = block_metadata
   ))
 }
+
+
+#' Check and optionally repair LD matrix quality
+#'
+#' Diagnoses positive-definiteness of an LD correlation matrix and optionally
+#' repairs it. Downstream methods like PRS-CS require positive-definite LD
+#' (Cholesky decomposition), while others (lassosum, SDPR) handle non-PD
+#' matrices internally via their own regularization.
+#'
+#' Three modes are available:
+#' \describe{
+#'   \item{\code{"check"}}{Diagnostic only — returns eigenvalue statistics
+#'     without modifying the matrix.}
+#'   \item{\code{"shrink"}}{Apply shrinkage toward identity:
+#'     \code{R_s = (1 - shrinkage) * R + shrinkage * I}. Simple and fast;
+#'     always produces a positive-definite matrix when \code{shrinkage > 0}.}
+#'   \item{\code{"eigenfix"}}{Set negative eigenvalues to zero and
+#'     reconstruct the matrix. Matches the approach used in susieR's
+#'     \code{rss_lambda_constructor} and is the closest positive
+#'     semidefinite matrix in the Frobenius norm. Does not inflate the
+#'     diagonal like shrinkage does.}
+#' }
+#'
+#' @param R Symmetric correlation matrix.
+#' @param method One of \code{"check"}, \code{"shrink"}, or \code{"eigenfix"}.
+#' @param r_tol Eigenvalue tolerance. Eigenvalues with absolute value below
+#'   \code{r_tol} are treated as zero. Default: \code{1e-8}.
+#' @param shrinkage Shrinkage parameter for \code{method = "shrink"}.
+#'   Default: \code{0.01}.
+#'
+#' @return A list with components:
+#' \describe{
+#'   \item{R}{The (possibly repaired) LD matrix.}
+#'   \item{is_pd}{Logical: is the matrix positive definite?}
+#'   \item{is_psd}{Logical: is the matrix positive semidefinite (within r_tol)?}
+#'   \item{min_eigenvalue}{Smallest eigenvalue of the original matrix.}
+#'   \item{n_negative}{Number of negative eigenvalues (below -r_tol).}
+#'   \item{condition_number}{Ratio of largest to smallest positive eigenvalue
+#'     (\code{Inf} if any eigenvalue is zero).}
+#'   \item{method_applied}{Character: \code{"none"}, \code{"shrink"}, or
+#'     \code{"eigenfix"}.}
+#' }
+#'
+#' @examples
+#' # A well-conditioned matrix
+#' R_good <- diag(5)
+#' check_ld(R_good)$is_pd  # TRUE
+#'
+#' # A matrix with negative eigenvalues
+#' R_bad <- matrix(0.9, 3, 3); diag(R_bad) <- 1; R_bad[1,3] <- R_bad[3,1] <- -0.5
+#' check_ld(R_bad)$is_psd  # FALSE
+#' R_fixed <- check_ld(R_bad, method = "eigenfix")$R
+#' check_ld(R_fixed)$is_psd  # TRUE
+#'
+#' @export
+check_ld <- function(R,
+                     method = c("check", "shrink", "eigenfix"),
+                     r_tol = 1e-8,
+                     shrinkage = 0.01) {
+  method <- match.arg(method)
+  p <- nrow(R)
+
+  # Eigen decomposition (symmetric)
+  eig <- eigen(R, symmetric = TRUE)
+  vals <- eig$values
+
+  # Diagnostics
+  min_eval <- min(vals)
+  n_neg <- sum(vals < -r_tol)
+  pos_vals <- vals[vals > r_tol]
+  cond_num <- if (length(pos_vals) > 0) max(pos_vals) / min(pos_vals) else Inf
+  is_psd <- !any(vals < -r_tol)
+  is_pd <- all(vals > r_tol)
+
+  method_applied <- "none"
+  R_out <- R
+
+  if (method == "shrink" && !is_pd) {
+    R_out <- (1 - shrinkage) * R + shrinkage * diag(p)
+    method_applied <- "shrink"
+  } else if (method == "eigenfix" && !is_psd) {
+    # Set negative eigenvalues to zero and reconstruct
+    # (closest PSD matrix in Frobenius norm — susieR approach)
+    vals_fixed <- pmax(vals, 0)
+    R_out <- eig$vectors %*% diag(vals_fixed) %*% t(eig$vectors)
+    # Restore exact symmetry and unit diagonal
+    R_out <- (R_out + t(R_out)) / 2
+    diag(R_out) <- 1
+    method_applied <- "eigenfix"
+  }
+
+  list(
+    R = R_out,
+    is_pd = is_pd,
+    is_psd = is_psd,
+    min_eigenvalue = min_eval,
+    n_negative = n_neg,
+    condition_number = cond_num,
+    method_applied = method_applied
+  )
+}
