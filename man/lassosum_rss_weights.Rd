@@ -2,13 +2,27 @@
 % Please edit documentation in R/regularized_regression.R
 \name{lassosum_rss_weights}
 \alias{lassosum_rss_weights}
-\title{Extract weights from lassosum_rss function}
+\title{Extract weights from lassosum_rss with shrinkage grid search}
 \usage{
-lassosum_rss_weights(stat, LD, ...)
+lassosum_rss_weights(stat, LD, s = c(0.2, 0.5, 0.9, 1), ...)
+}
+\arguments{
+\item{stat}{A list with \code{$b} (effect sizes) and \code{$n} (per-variant sample sizes).}
+
+\item{LD}{LD correlation matrix R (single matrix, NOT pre-shrunk).}
+
+\item{s}{Numeric vector of shrinkage parameters to search over. Default:
+\code{c(0.2, 0.5, 0.9, 1.0)} following Mak et al (2017) and OTTERS.}
+
+\item{...}{Additional arguments passed to \code{lassosum_rss()}.}
 }
 \value{
-A numeric vector of the posterior SNP coefficients.
+A numeric vector of the posterior SNP coefficients at the best (s, lambda).
 }
 \description{
-Extract weights from lassosum_rss function
+Searches over a grid of shrinkage parameters \code{s} (default:
+\code{c(0.2, 0.5, 0.9, 1.0)}, matching the original lassosum and OTTERS).
+For each \code{s}, the LD matrix is shrunk as \code{(1-s)*R + s*I}, then
+\code{lassosum_rss()} is called across the lambda path. The best
+\code{(s, lambda)} combination is selected by the lowest objective value.
 }
