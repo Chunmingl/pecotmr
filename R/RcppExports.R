@@ -23,6 +23,10 @@ dentist_iterative_impute <- function(LD_mat, nSample, zScore, pValueThreshold, p
     .Call('_pecotmr_dentist_iterative_impute', PACKAGE = 'pecotmr', LD_mat, nSample, zScore, pValueThreshold, propSVD, gcControl, nIter, gPvalueThreshold, ncpus, correct_chen_et_al_bug, verbose)
 }
 
+lassosum_rss_rcpp <- function(z, LD, lambda, thr, maxiter) {
+    .Call('_pecotmr_lassosum_rss_rcpp', PACKAGE = 'pecotmr', z, LD, lambda, thr, maxiter)
+}
+
 prs_cs_rcpp <- function(a, b, phi, bhat, maf, n, ld_blk, n_iter, n_burnin, thin, verbose, seed) {
     .Call('_pecotmr_prs_cs_rcpp', PACKAGE = 'pecotmr', a, b, phi, bhat, maf, n, ld_blk, n_iter, n_burnin, thin, verbose, seed)
 }

@@ -782,3 +782,79 @@ bayes_c_rss_weights <- function(sumstats, LD, ...) {
 bayes_r_rss_weights <- function(sumstats, LD, ...) {
   return(bayes_alphabet_rss_weights(sumstats, LD, method = "bayesR", ...))
 }
+
+#' Lassosum RSS: LASSO on summary statistics with LD reference
+#'
+#' Coordinate descent to solve the penalized regression on summary statistics:
+#' \deqn{f(\beta) = \beta' R \beta - 2\beta' r + 2\lambda ||\beta||_1}
+#' where \eqn{R} is the LD matrix (pre-shrunk if desired) and \eqn{r = \hat\beta / \sqrt{n}}.
+#'
+#' Based on Mak et al (2017) "Polygenic scores via penalized regression on summary statistics",
+#' Genetic Epidemiology 41(6):469-480.
+#'
+#' @param bhat A vector of marginal effect sizes.
+#' @param LD A list of LD blocks, where each element is a matrix representing an LD block.
+#'   If shrinkage is desired, apply it before passing (e.g., \code{(1-s)*R + s*I}).
+#' @param n Sample size of the GWAS.
+#' @param lambda A vector of L1 penalty values. Default: 20 values from 0.001 to 0.1 on log scale.
+#' @param thr Convergence threshold. Default: 1e-4.
+#' @param maxiter Maximum number of iterations. Default: 10000.
+#'
+#' @return A list containing:
+#'   \item{beta_est}{Posterior estimates of SNP effect sizes at best lambda.}
+#'   \item{beta}{Matrix of estimates (p x nlambda).}
+#'   \item{lambda}{The lambda values used.}
+#'   \item{conv}{Convergence indicators (1 = converged).}
+#'   \item{loss}{Quadratic loss at each lambda.}
+#'   \item{fbeta}{Full objective value at each lambda.}
+#'   \item{nparams}{Number of non-zero coefficients at each lambda.}
+#'
+#' @examples
+#' set.seed(42)
+#' p <- 10
+#' n <- 100
+#' bhat <- rnorm(p, sd = 0.1)
+#' R <- diag(p)
+#' for (i in 1:(p - 1)) {
+#'   R[i, i + 1] <- 0.3
+#'   R[i + 1, i] <- 0.3
+#' }
+#' LD <- list(blk1 = R)
+#' out <- lassosum_rss(bhat, LD, n)
+#' @export
+lassosum_rss <- function(bhat, LD, n,
+                         lambda = exp(seq(log(0.001), log(0.1), length.out = 20)),
+                         thr = 1e-4, maxiter = 10000) {
+  if (!is.list(LD)) {
+    stop("Please provide a valid list of LD blocks using 'LD'.")
+  }
+  if (missing(n) || n <= 0) {
+    stop("Please provide a valid sample size using 'n'.")
+  }
+  total_rows_in_LD <- sum(sapply(LD, nrow))
+  if (length(bhat) != total_rows_in_LD) {
+    stop("The length of 'bhat' must be the same as the sum of the number of rows of all elements in the 'LD' list.")
+  }
+
+  z <- bhat / sqrt(n)
+  order <- order(lambda, decreasing = TRUE)
+  result <- lassosum_rss_rcpp(z, LD, lambda[order], thr, maxiter)
+
+  # Reorder back to original lambda order
+  result$beta[, order] <- result$beta
+  result$conv[order] <- result$conv
+  result$loss[order] <- result$loss
+  result$fbeta[order] <- result$fbeta
+  result$lambda <- lambda
+  result$nparams <- as.integer(colSums(result$beta != 0))
+  result$beta_est <- as.numeric(result$beta[, which.min(result$fbeta)])
+  result
+}
+
+#' Extract weights from lassosum_rss function
+#' @return A numeric vector of the posterior SNP coefficients.
+#' @export
+lassosum_rss_weights <- function(stat, LD, ...) {
+  model <- lassosum_rss(bhat = stat$b, LD = list(blk1 = LD), n = median(stat$n), ...)
+  return(model$beta_est)
+}

@@ -4,7 +4,12 @@
 \alias{compute_LD}
 \title{Compute LD (Linkage Disequilibrium) Correlation Matrix from Genotypes}
 \usage{
-compute_LD(X, method = c("sample", "population"), trim_samples = FALSE)
+compute_LD(
+  X,
+  method = c("sample", "population"),
+  trim_samples = FALSE,
+  shrinkage = 0
+)
 }
 \arguments{
 \item{X}{Numeric genotype matrix (samples x SNPs). May contain \code{NA}
@@ -17,6 +22,11 @@ for missing genotypes.}
 drops trailing samples so that \code{nrow(X)} is a multiple of 4, matching
 PLINK .bed file chunk processing. Ignored when \code{method = "sample"}.
 Default is \code{FALSE}.}
+
+\item{shrinkage}{Numeric in (0, 1]. Shrink the LD matrix toward the identity:
+\code{R_s = (1 - shrinkage) * R + shrinkage * I}. Useful for regularizing
+LD for summary-statistics-based methods such as lassosum (Mak et al 2017).
+Default is 0 (no shrinkage).}
 }
 \value{
 A symmetric correlation matrix with row and column names taken from

@@ -153,6 +153,10 @@ is_zero_variance <- function(x) length(unique(x)) == 1
 #'   drops trailing samples so that \code{nrow(X)} is a multiple of 4, matching
 #'   PLINK .bed file chunk processing. Ignored when \code{method = "sample"}.
 #'   Default is \code{FALSE}.
+#' @param shrinkage Numeric in (0, 1]. Shrink the LD matrix toward the identity:
+#'   \code{R_s = (1 - shrinkage) * R + shrinkage * I}. Useful for regularizing
+#'   LD for summary-statistics-based methods such as lassosum (Mak et al 2017).
+#'   Default is 0 (no shrinkage).
 #'
 #' @return A symmetric correlation matrix with row and column names taken from
 #'   \code{colnames(X)}.
@@ -188,7 +192,7 @@ is_zero_variance <- function(x) length(unique(x)) == 1
 #'
 #' @export
 compute_LD <- function(X, method = c("sample", "population"),
-                       trim_samples = FALSE) {
+                       trim_samples = FALSE, shrinkage = 0) {
   if (is.null(X)) {
     stop("X must be provided.")
   }
@@ -235,6 +239,13 @@ compute_LD <- function(X, method = c("sample", "population"),
   # Ensure clean output
   diag(R) <- 1.0
   R[is.na(R) | is.nan(R)] <- 0
+
+  # Optional shrinkage toward identity: R_s = (1 - shrinkage) * R + shrinkage * I
+  # Used e.g. by lassosum (Mak et al 2017) to regularize LD for RSS methods.
+  if (shrinkage > 0 && shrinkage <= 1) {
+    R <- (1 - shrinkage) * R + shrinkage * diag(nrow(R))
+  }
+
   colnames(R) <- rownames(R) <- nms
   R
 }
