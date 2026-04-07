@@ -5,12 +5,6 @@
 #include <fstream>
 #include <numeric>
 #include <random>
-#ifdef __arm64__
-#include "simde/x86/avx512.h"
-#else
-#include <x86intrin.h>
-#endif
-#include "sse_mathfun.h"
 #include "function_pool.h"
 #include "sdpr_mcmc.h"
 
@@ -62,102 +56,63 @@ void MCMC_state::calc_b(size_t j, const mcmc_data &dat, const ldmat_data &ldmat_
 	b.subvec(start_i, end_i - 1) = b_j;
 }
 
+// Cluster assignment sampling using Armadillo vectorized log/exp.
+//
+// The original SDPR (Zhou et al.) used x86 SSE intrinsics (log_ps, exp_ps,
+// _mm_max_ps, _mm_hadd_ps) to process 4 floats at a time for the log-sum-exp
+// computation over M cluster probabilities. We replace this with Armadillo
+// vectorized operations (arma::log, arma::exp, arma::max, arma::accu) which
+// delegate to platform-optimal SIMD (NEON on ARM, SSE/AVX on x86) through
+// the underlying BLAS/compiler auto-vectorization, giving portable performance
+// without architecture-specific intrinsics.
 void MCMC_state::sample_assignment(size_t j, const mcmc_data &dat, const ldmat_data &ldmat_dat) {
 	size_t start_i = dat.boundary[j].first;
 	size_t end_i = dat.boundary[j].second;
+	size_t n_snp_blk = end_i - start_i;
 
-	vector<vector<float> > prob(end_i-start_i, vector<float>(M));
-	vector<vector<float> > tmp(end_i-start_i, vector<float>(M));
-	vector<float> Bjj(end_i-start_i);
-	vector<float> bj(end_i-start_i);
-	vector<float> rnd(end_i-start_i);
-
-	float max_elem, log_exp_sum = 0;
-
-	std::uniform_real_distribution<float> unif(0.0, 1.0);
-
-	for (size_t i=0; i<end_i-start_i; i++) {
-		Bjj[i] = ldmat_dat.B[j](i, i);
-		bj[i] = b(start_i+i);
-
-		prob[i][0] = log_p[0];
-		rnd[i] = unif(r);
-	}
+	std::uniform_real_distribution<double> unif(0.0, 1.0);
 
 	// N = 1.0 after May 21 2021
-	float C = pow(eta, 2.0) * N;
+	double C = eta * eta * N;
 
-	// auto vectorized
-	for (size_t i=0; i<end_i-start_i; i++) {
-		for (size_t k=1; k<M; k++) {
-			prob[i][k] = C * Bjj[i] * cluster_var[k] + 1;
-		}
+	// Cluster variances as arma::vec for vectorized ops (skip null cluster 0)
+	arma::vec cvar(M);
+	for (size_t k = 0; k < M; k++) {
+		cvar(k) = cluster_var[k];
 	}
 
-	// unable to auto vectorize due to log
-	// explicitly using SSE
-	__m128 _v, _m;
-	for (size_t i=0; i<end_i-start_i; i++) {
-		size_t k = 1;
-		for (; k<M; k+=4) { // require M >= 4
-			_v = log_ps(_mm_loadu_ps(&prob[i][k]));
-			_mm_storeu_ps(&tmp[i][k], _v);
+	for (size_t i = 0; i < n_snp_blk; i++) {
+		double Bjj_i = ldmat_dat.B[j](i, i);
+		double bj_i  = b(start_i + i);
+		double rnd_i = unif(r);
+
+		// prob_vec[k] = log P(z_i = k | ...) for each cluster k
+		arma::vec prob_vec(M);
+		prob_vec(0) = log_p[0];
+
+		// For clusters k=1..M-1:
+		//   Ck = C * Bjj * var_k + 1
+		//   prob[k] = -0.5*log(Ck) + log_p[k] + (N*bj)^2 * var_k / (2*Ck)
+		arma::vec Ck = C * Bjj_i * cvar.subvec(1, M-1) + 1.0;
+		arma::vec log_p_vec(M - 1);
+		for (size_t k = 1; k < M; k++) {
+			log_p_vec(k-1) = log_p[k];
 		}
+		prob_vec.subvec(1, M-1) = -0.5 * arma::log(Ck) + log_p_vec
+			+ (N * bj_i) * (N * bj_i) * cvar.subvec(1, M-1) / (2.0 * Ck);
 
-		for (; k<M; k++) {
-			tmp[i][k] = logf(prob[i][k]);
-		}
-	}
+		// Log-sum-exp for numerical stability:
+		//   LSE = max + log(sum(exp(prob - max)))
+		double max_elem = prob_vec.max();
+		double log_exp_sum = max_elem
+			+ std::log(arma::accu(arma::exp(prob_vec - max_elem)));
 
-	// auto vectorized
-	for (size_t i=0; i<end_i-start_i; i++) {
-		for (size_t k=1; k<M; k++) {
-			prob[i][k] = -0.5*tmp[i][k] + log_p[k] + square(N*bj[i]) * cluster_var[k] / (2*prob[i][k]);
-		}
-	}
-
-	for (size_t i=0; i<end_i-start_i; i++) {
-		// SSE version to find max
-		_v = _mm_loadu_ps(&prob[i][0]);
-		size_t k = 4;
-		for (; k<M; k+=4) {
-			_v = _mm_max_ps(_v, _mm_loadu_ps(&prob[i][k]));
-		}
-
-		for (size_t m=0; m<3; m++) {
-			_v = _mm_max_ps(_v, _mm_shuffle_ps(_v, _v, 0x93));
-		}
-
-		_mm_store_ss(&max_elem, _v);
-
-		for (; k<M; k++) {
-			max_elem = (max_elem > prob[i][k]) ? max_elem : prob[i][k];
-		}
-
-		// SSE version log exp sum
-		_m = _mm_load1_ps(&max_elem);
-		_v = exp_ps(_mm_sub_ps(_mm_loadu_ps(&prob[i][0]), _m));
-
-		k = 4;
-		for (; k<M; k+=4) {
-			_v = _mm_add_ps(_v, exp_ps(_mm_sub_ps(_mm_loadu_ps(&prob[i][k]), _m)));
-		}
-
-		_v = _mm_hadd_ps(_v, _v);
-		_v = _mm_hadd_ps(_v, _v);
-		_mm_store_ss(&log_exp_sum, _v);
-
-		for (; k<M; k++) {
-			log_exp_sum += expf(prob[i][k] - max_elem);
-		}
-
-		log_exp_sum = max_elem + logf(log_exp_sum);
-
-		cls_assgn[i+start_i] = M-1;
-		for (size_t k=0; k<M-1; k++) {
-			rnd[i] -= expf(prob[i][k] - log_exp_sum);
-			if (rnd[i] < 0) {
-				cls_assgn[i+start_i] = k;
+		// Categorical sampling via inverse CDF
+		cls_assgn[i + start_i] = M - 1;
+		for (size_t k = 0; k < M - 1; k++) {
+			rnd_i -= std::exp(prob_vec(k) - log_exp_sum);
+			if (rnd_i < 0) {
+				cls_assgn[i + start_i] = k;
 				break;
 			}
 		}
