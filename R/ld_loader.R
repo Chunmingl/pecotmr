@@ -111,10 +111,11 @@ ld_loader <- function(R_list = NULL, X_list = NULL,
 
     loader <- function(g) {
       ld_file <- LD_info$LD_file[g]
+      # SNP_file is optional; process_LD_matrix auto-detects .bim/.pvar/.pvar.zst
       snp_file <- if ("SNP_file" %in% colnames(LD_info)) {
         LD_info$SNP_file[g]
       } else {
-        paste0(ld_file, ".bim")
+        NULL  # let process_LD_matrix auto-detect
       }
       ld <- process_LD_matrix(ld_file, snp_file)
       mat <- ld$LD_matrix
