@@ -188,6 +188,45 @@ test_that("sdpr with valid array parameter", {
   expect_true(all(is.finite(result$beta_est)))
 })
 
+# ---- sdpr signal recovery ----
+test_that("sdpr recovers signal direction on simulated genotype data", {
+  set.seed(2024)
+  n <- 500
+  p <- 20
+  # Realistic genotype matrix with non-trivial LD (binomial, MAF=0.3)
+  X <- matrix(rbinom(n * p, 2, 0.3), nrow = n)
+  beta_true <- rep(0, p)
+  beta_true[c(3, 10, 15)] <- c(0.4, -0.3, 0.2)
+  y <- X %*% beta_true + rnorm(n)
+  bhat <- as.vector(cor(y, X))
+  R <- cor(X)
+  result <- sdpr(bhat = bhat, LD = list(blk1 = R), n = n,
+                 iter = 500, burn = 200, thin = 5, verbose = FALSE)
+  expect_true("beta_est" %in% names(result))
+  expect_equal(length(result$beta_est), p)
+  expect_true(all(is.finite(result$beta_est)))
+  # Correlation with truth should be positive (signal recovery)
+  expect_gt(cor(result$beta_est, beta_true), 0.5)
+})
+
+test_that("sdpr accepts multiple LD blocks with realistic genotype data", {
+  set.seed(2024)
+  n <- 500
+  p <- 20
+  X <- matrix(rbinom(n * p, 2, 0.3), nrow = n)
+  beta_true <- rep(0, p)
+  beta_true[c(3, 15)] <- c(0.4, 0.2)
+  y <- X %*% beta_true + rnorm(n)
+  bhat <- as.vector(cor(y, X))
+  R <- cor(X)
+  R1 <- R[1:10, 1:10]
+  R2 <- R[11:20, 11:20]
+  result <- sdpr(bhat = bhat, LD = list(blk1 = R1, blk2 = R2), n = n,
+                 iter = 500, burn = 200, thin = 5, verbose = FALSE)
+  expect_equal(length(result$beta_est), p)
+  expect_true(all(is.finite(result$beta_est)))
+})
+
 # ---- sdpr_weights (wrapper) ----
 test_that("sdpr_weights calls sdpr and returns beta_est", {
   set.seed(42)
