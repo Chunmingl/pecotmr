@@ -840,11 +840,14 @@ lassosum_rss <- function(bhat, LD, n,
   order <- order(lambda, decreasing = TRUE)
   result <- lassosum_rss_rcpp(z, LD, lambda[order], thr, maxiter)
 
-  # Reorder back to original lambda order
-  result$beta[, order] <- result$beta
-  result$conv[order] <- result$conv
-  result$loss[order] <- result$loss
-  result$fbeta[order] <- result$fbeta
+  # Reorder back to original lambda order.
+  # Must use inverse permutation to unsort: if order[i]=j, then
+  # the result at position j in the sorted output goes to position i.
+  inv_order <- order(order)
+  result$beta  <- result$beta[, inv_order, drop = FALSE]
+  result$conv  <- result$conv[inv_order]
+  result$loss  <- result$loss[inv_order]
+  result$fbeta <- result$fbeta[inv_order]
   result$lambda <- lambda
   result$nparams <- as.integer(colSums(result$beta != 0))
   result$beta_est <- as.numeric(result$beta[, which.min(result$fbeta)])
