@@ -89,13 +89,7 @@ otters_weights <- function(sumstats, LD, n,
   z <- sumstats$z
 
   # Build stat object for _weights() convention
-  # Safeguard: clamp marginal correlations to (-1, 1) as required by lassosum
-  # (matches OTTERS shrink_factor logic in PRSmodels/lassosum.R lines 71-77)
   b <- z / sqrt(n)
-  max_abs_b <- max(abs(b))
-  if (max_abs_b >= 1) {
-    b <- b / (max_abs_b / 0.9999)
-  }
   stat <- list(b = b, n = rep(n, p))
 
   results <- list()

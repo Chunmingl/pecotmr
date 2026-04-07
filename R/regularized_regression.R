@@ -884,10 +884,20 @@ lassosum_rss_weights <- function(stat, LD, s = c(0.2, 0.5, 0.9, 1.0), ...) {
   best_fbeta <- Inf
   best_beta  <- rep(0, p)
 
+  # Clamp marginal correlations to (-1, 1) as required by lassosum.
+  # This is lassosum-specific — other methods (PRS-CS, SDPR) handle
+  # their own regularization and should not be globally rescaled.
+  # Matches OTTERS shrink_factor logic (PRSmodels/lassosum.R lines 71-77).
+  bhat <- stat$b
+  max_abs_b <- max(abs(bhat))
+  if (max_abs_b >= 1) {
+    bhat <- bhat / (max_abs_b / 0.9999)
+  }
+
   for (s_val in s) {
     # Shrink LD: R_s = (1 - s) * R + s * I
     LD_s <- (1 - s_val) * LD + s_val * diag(p)
-    model <- lassosum_rss(bhat = stat$b, LD = list(blk1 = LD_s), n = n, ...)
+    model <- lassosum_rss(bhat = bhat, LD = list(blk1 = LD_s), n = n, ...)
     min_fbeta <- min(model$fbeta)
     if (min_fbeta < best_fbeta) {
       best_fbeta <- min_fbeta

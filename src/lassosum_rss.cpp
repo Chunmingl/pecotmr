@@ -53,14 +53,15 @@ Rcpp::List lassosum_rss_rcpp(const arma::vec& z,
                               const arma::vec& lambda,
                               double thr,
                               int maxiter) {
-  // Compute total number of variants across all blocks
+  // Cache LD blocks once (avoid re-copying from R on every lambda iteration)
   int n_blocks = LD.size();
+  std::vector<arma::mat> ld_blocks(n_blocks);
   std::vector<int> block_start(n_blocks), block_end(n_blocks);
   int p = 0;
   for (int b = 0; b < n_blocks; b++) {
-    arma::mat Rb = Rcpp::as<arma::mat>(LD[b]);
+    ld_blocks[b] = Rcpp::as<arma::mat>(LD[b]);
     block_start[b] = p;
-    p += Rb.n_rows;
+    p += ld_blocks[b].n_rows;
     block_end[b] = p - 1;
   }
 
@@ -80,7 +81,7 @@ Rcpp::List lassosum_rss_rcpp(const arma::vec& z,
     // Block-wise coordinate descent — mirrors lassosum repelnet()
     int out = 1;
     for (int b = 0; b < n_blocks; b++) {
-      arma::mat Rb = Rcpp::as<arma::mat>(LD[b]);
+      const arma::mat& Rb = ld_blocks[b];
       int s = block_start[b];
       int e = block_end[b];
       arma::vec diag_R = Rb.diag();
@@ -100,7 +101,7 @@ Rcpp::List lassosum_rss_rcpp(const arma::vec& z,
     // Compute loss = beta'R beta - 2 z'beta (block-wise)
     double loss = -2.0 * arma::dot(z, beta);
     for (int b = 0; b < n_blocks; b++) {
-      arma::mat Rb = Rcpp::as<arma::mat>(LD[b]);
+      const arma::mat& Rb = ld_blocks[b];
       int s = block_start[b];
       int e = block_end[b];
       arma::vec beta_blk = beta.subvec(s, e);

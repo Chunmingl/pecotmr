@@ -891,7 +891,7 @@ check_ld <- function(R,
   if (method == "shrink" && !is_pd) {
     R_out <- (1 - shrinkage) * R + shrinkage * diag(p)
     method_applied <- "shrink"
-  } else if (method == "eigenfix" && !is_psd) {
+  } else if (method == "eigenfix" && !is_pd) {
     # Set negative eigenvalues to a small positive value and reconstruct.
     # Using r_tol (not zero) ensures the result is strictly positive
     # definite, which is required by methods that use Cholesky decomposition

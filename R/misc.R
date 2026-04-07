@@ -16,8 +16,14 @@ pval_acat <- function(pvals) {
   }
   # ACAT statistic: T = mean(tan(pi*(0.5 - p_i)))
   # Liu & Xie (2020) "Cauchy combination test"
-  # For very small p, tan(pi*(0.5-p)) ~ 1/(pi*p), so T is large and positive.
-  stat <- mean(tan(pi * (0.5 - pvals)))
+  #
+  # For very small p, tan(pi*(0.5-p)) overflows due to floating-point
+  # precision loss in pi*0.5. Use the asymptotic approximation
+  # tan(pi*(0.5-p)) ~ 1/(pi*p) for p < 1e-15 to avoid Inf/NaN.
+  cauchy_vals <- ifelse(pvals < 1e-15,
+                        1 / (pvals * pi),
+                        tan(pi * (0.5 - pvals)))
+  stat <- mean(cauchy_vals)
   return(pcauchy(stat, lower.tail = FALSE))
 }
 
