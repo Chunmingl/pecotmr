@@ -44,6 +44,21 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// lassosum_rss_rcpp
+Rcpp::List lassosum_rss_rcpp(const arma::vec& z, const Rcpp::List& LD, const arma::vec& lambda, double thr, int maxiter);
+RcppExport SEXP _pecotmr_lassosum_rss_rcpp(SEXP zSEXP, SEXP LDSEXP, SEXP lambdaSEXP, SEXP thrSEXP, SEXP maxiterSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const arma::vec& >::type z(zSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::List& >::type LD(LDSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type lambda(lambdaSEXP);
+    Rcpp::traits::input_parameter< double >::type thr(thrSEXP);
+    Rcpp::traits::input_parameter< int >::type maxiter(maxiterSEXP);
+    rcpp_result_gen = Rcpp::wrap(lassosum_rss_rcpp(z, LD, lambda, thr, maxiter));
+    return rcpp_result_gen;
+END_RCPP
+}
 // prs_cs_rcpp
 Rcpp::List prs_cs_rcpp(double a, double b, Rcpp::Nullable<double> phi, Rcpp::NumericVector bhat, Rcpp::Nullable<Rcpp::NumericVector> maf, int n, Rcpp::List ld_blk, int n_iter, int n_burnin, int thin, bool verbose, Rcpp::Nullable<unsigned int> seed);
 RcppExport SEXP _pecotmr_prs_cs_rcpp(SEXP aSEXP, SEXP bSEXP, SEXP phiSEXP, SEXP bhatSEXP, SEXP mafSEXP, SEXP nSEXP, SEXP ld_blkSEXP, SEXP n_iterSEXP, SEXP n_burninSEXP, SEXP thinSEXP, SEXP verboseSEXP, SEXP seedSEXP) {
@@ -113,6 +128,7 @@ END_RCPP
 static const R_CallMethodDef CallEntries[] = {
     {"_pecotmr_compute_LD_gcta_cpp", (DL_FUNC) &_pecotmr_compute_LD_gcta_cpp, 2},
     {"_pecotmr_dentist_iterative_impute", (DL_FUNC) &_pecotmr_dentist_iterative_impute, 11},
+    {"_pecotmr_lassosum_rss_rcpp", (DL_FUNC) &_pecotmr_lassosum_rss_rcpp, 5},
     {"_pecotmr_prs_cs_rcpp", (DL_FUNC) &_pecotmr_prs_cs_rcpp, 12},
     {"_pecotmr_qtl_enrichment_rcpp", (DL_FUNC) &_pecotmr_qtl_enrichment_rcpp, 7},
     {"_pecotmr_sdpr_rcpp", (DL_FUNC) &_pecotmr_sdpr_rcpp, 16},
