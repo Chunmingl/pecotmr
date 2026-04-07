@@ -33,9 +33,8 @@ pval_hmp <- function(pvals) {
     stop("To use this function, please install harmonicmeanp: https://cran.r-project.org/web/packages/harmonicmeanp/index.html")
   }
   # https://search.r-project.org/CRAN/refmans/harmonicmeanp/html/pLandau.html
-  pvalues <- unique(pvals)
-  L <- length(pvalues)
-  HMP <- L / sum(pvalues^-1)
+  L <- length(pvals)
+  HMP <- L / sum(pvals^-1)
 
   LOC_L1 <- 0.874367040387922
   SCALE <- 1.5707963267949
@@ -230,7 +229,22 @@ compute_LD <- function(X, method = c("sample", "population"),
     col_means <- colMeans(X, na.rm = TRUE)
     # Population variance: E[X^2] - E[X]^2
     col_vars <- colMeans(X^2, na.rm = TRUE) - col_means^2
-    # Center; set NA -> 0 so missing pairs don't contribute to cross-products
+    # Center; set NA -> 0 so missing pairs don't contribute to cross-products.
+    # NOTE: the covariance divides by total N (not pairwise non-missing counts),
+    # which is an approximation that assumes uniform missingness across SNPs.
+    # With heterogeneous missingness, correlations between high-missing and
+    # low-missing columns will be slightly deflated. This matches the GCTA
+    # convention and is standard for PLINK-style LD computation.
+    if (anyNA(X)) {
+      na_rates <- colMeans(is.na(X))
+      if (max(na_rates) - min(na_rates) > 0.1) {
+        warning("Population LD method with heterogeneous missingness ",
+                "(max NA rate ", round(max(na_rates), 3),
+                ", min ", round(min(na_rates), 3),
+                "): correlations may be biased. Consider using method='sample' ",
+                "which handles missingness via mean imputation.")
+      }
+    }
     X_c <- sweep(X, 2, col_means)
     X_c[is.na(X_c)] <- 0
     # Covariance with N denominator

@@ -214,6 +214,11 @@ sdpr <- function(bhat, LD, n, per_variant_sample_size = NULL, array = NULL, a = 
     stop("The total sample size 'n' must be a positive integer.")
   }
 
+  # M must be >= 4 (SDPR uses M-2 indexing in sample_V; M < 4 causes buffer overflow)
+  if (M < 4) {
+    stop("'M' must be at least 4.")
+  }
+
   # Check if per_variant_sample_size vector contains only positive values (if provided)
   if (!is.null(per_variant_sample_size) && any(per_variant_sample_size <= 0)) {
     stop("The 'per_variant_sample_size' vector must contain only positive values.")
