@@ -26,10 +26,18 @@ rss_basic_qc <- function(sumstats, LD_data, skip_region = NULL, keep_indel = TRU
     stop("Missing columns in sumstats: ", paste(missing_cols, collapse = ", "))
   }
 
+  # Dynamically detect which effect columns exist to flip
+  # Must have at least one of beta or z
+  flip_candidates <- c("beta", "z")
+  col_to_flip <- intersect(flip_candidates, colnames(sumstats))
+  if (length(col_to_flip) == 0) {
+    stop("sumstats must contain at least one of: 'beta', 'z'")
+  }
+
   ref_variants <- LD_data$LD_variants
 
   allele_flip <- allele_qc(sumstats, ref_variants,
-    col_to_flip = c("beta", "z"),
+    col_to_flip = col_to_flip,
     match_min_prop = 0, remove_dups = TRUE, remove_indels = !keep_indel,
     remove_strand_ambiguous = TRUE
   )
