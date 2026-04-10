@@ -154,7 +154,7 @@ is_zero_variance <- function(x) length(unique(x)) == 1
 #'   where r is the number of retained singular values.
 #' @noRd
 safe_svd <- function(mat, tol = 1e-8, max_rank = NULL) {
-  if (all(mat == 0)) {
+  if (max(abs(mat)) == 0) {
     stop("Cannot compute SVD of an all-zero matrix.")
   }
   # Compute thin SVD

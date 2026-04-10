@@ -131,39 +131,53 @@ raiss_single_matrix_from_X <- function(ref_panel, known_zscores, X, lamb = 0.01,
     ))
   }
 
-  # Partition genotype matrix by known/unknown columns
+  # Extract known columns for SVD (unavoidable copy for LAPACK).
+  # We do NOT copy X_i — instead we compute X' %*% [w|U] on the full X
+  # and index the unknown rows, saving O(n*m) memory.
   X_t <- X[, knowns, drop = FALSE]
-  X_i <- X[, unknowns, drop = FALSE]
   zt <- known_zscores$z
 
-  # Compute thin SVD of X_t
+  # Compute thin SVD of X_t (n x k -> U: n x r, d: r, V: k x r)
   svd_result <- safe_svd(X_t, tol = svd_tol)
-  U <- svd_result$u   # n x r
-  d <- svd_result$d    # length r
-  V <- svd_result$v    # k x r
+  U <- svd_result$u
+  d <- svd_result$d
+  V <- svd_result$v
+  rm(X_t)  # free n*k memory; no longer needed
 
-  # Regularization constant: c = lamb * (n - 1)
+  # Precompute regularization and weight vectors (length r, cheap)
   c_reg <- lamb * (n_samples - 1)
+  d2 <- d^2
+  d2_plus_c <- d2 + c_reg
 
-  # --- Imputed z-scores (mu) ---
-  # mu = X_i' U diag(d / (d^2 + c)) V' zt
+  # --- Build w (n x 1): the projection of zt through the regularized SVD ---
+  # w = U %*% diag(d / (d^2 + c)) %*% V' zt
   Vt_zt <- crossprod(V, zt)                       # r x 1
-  d_weights_mu <- d / (d^2 + c_reg)               # r x 1
-  w <- U %*% (d_weights_mu * Vt_zt)               # n x 1
-  mu <- as.numeric(crossprod(X_i, w))              # m x 1
+  w <- U %*% (d / d2_plus_c * Vt_zt)              # n x 1
 
-  # --- Variance ---
-  # A = X_i' U  (m x r)
-  # var = (1 + lamb) - (1/(n-1)) * (A^2 %*% (d^2 / (d^2 + c)))
-  A <- crossprod(X_i, U)                           # m x r
-  d_weights_var <- d^2 / (d^2 + c_reg)            # r x 1
-  var_raw <- (1 + lamb) - (1 / (n_samples - 1)) * as.numeric(A^2 %*% d_weights_var)
+  # --- Single BLAS call: X' %*% [w | U] -> p x (1+r) ---
+  # This avoids copying X_i (n x m) entirely.
+  # Row unknowns of column 1 gives mu; rows unknowns of columns 2:(r+1) gives A.
+  XtWU <- crossprod(X, cbind(w, U))               # p x (1+r), one dgemm call
+  mu <- as.numeric(XtWU[unknowns, 1])             # m x 1
+  A <- XtWU[unknowns, -1, drop = FALSE]           # m x r (subset, not copy of X)
+  rm(XtWU)                                         # free p*(1+r)
 
-  # --- LD score ---
-  # raiss_ld_score = (1/(n-1))^2 * (A^2 %*% d^2)
-  raiss_ld_score <- as.numeric(A^2 %*% d^2) / (n_samples - 1)^2
+  # --- Variance and LD score in one pass over A^2 ---
+  # var = (1+lamb) - (1/(n-1)) * A^2 %*% (d^2/(d^2+c))
+  # ld_score = (1/(n-1))^2 * A^2 %*% d^2
+  # Compute A^2 once, multiply by [d_weights_var | d^2] in one dgemm.
+  A_sq <- A^2                                      # m x r (one allocation)
+  rm(A)                                            # free m*r
+  d_weights <- cbind(d2 / d2_plus_c, d2)          # r x 2
+  scores <- A_sq %*% d_weights                    # m x 2 (one dgemm)
+  rm(A_sq)                                         # free m*r
 
-  # --- Condition number and inversion check ---
+  nm1 <- n_samples - 1
+  var_raw <- (1 + lamb) - scores[, 1] / nm1
+  raiss_ld_score <- scores[, 2] / nm1^2
+  rm(scores)
+
+  # --- Condition number (scalar, expanded to vector by format_raiss_df) ---
   condition_number <- rep(d[1] / d[length(d)], length(unknowns))
   correct_inversion <- rep(TRUE, length(unknowns))
 
