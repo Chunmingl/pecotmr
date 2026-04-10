@@ -7,9 +7,11 @@
 raiss(
   ref_panel,
   known_zscores,
-  LD_matrix,
+  LD_matrix = NULL,
+  genotype_matrix = NULL,
   lamb = 0.01,
   rcond = 0.01,
+  svd_tol = 1e-08,
   R2_threshold = 0.6,
   minimum_ld = 5,
   verbose = TRUE
@@ -20,11 +22,21 @@ raiss(
 
 \item{known_zscores}{A data frame containing 'chrom', 'pos', 'variant_id', 'A1', 'A2', and 'z' values.}
 
-\item{LD_matrix}{Either a square matrix or a list of matrices for LD blocks.}
+\item{LD_matrix}{Either a square matrix or a list of matrices for LD blocks.
+Provide either \code{LD_matrix} or \code{genotype_matrix}, not both.}
+
+\item{genotype_matrix}{A centered and scaled genotype matrix (n x p) as an alternative
+to \code{LD_matrix}. Column order must match the variant order in \code{ref_panel}.
+When provided, the imputation uses an SVD-based approach that avoids forming the
+p x p LD matrix.}
 
 \item{lamb}{Regularization term added to the diagonal of the LD_matrix.}
 
-\item{rcond}{Threshold for filtering eigenvalues in the pseudo-inverse computation.}
+\item{rcond}{Threshold for filtering eigenvalues in the pseudo-inverse computation
+(only used with LD_matrix path).}
+
+\item{svd_tol}{Relative tolerance for filtering small singular values
+(only used with genotype_matrix path).}
 
 \item{R2_threshold}{R square threshold below which SNPs are filtered from the output.}
 
@@ -33,7 +45,8 @@ raiss(
 \item{verbose}{Logical indicating whether to print progress information.}
 }
 \value{
-A list containing filtered and unfiltered results, and filtered LD matrix.
+A list containing filtered and unfiltered results, and filtered LD matrix
+  (LD_mat is NULL when using genotype_matrix path).
 }
 \description{
 This function is a part of the statistical library for SNP imputation from:
@@ -46,4 +59,6 @@ Bioinformatics in 2014.
 \details{
 This function can process either a single LD matrix or a list of LD matrices for different blocks.
 For a list of matrices, it processes each block separately and combines the results.
+Alternatively, it can accept a genotype matrix X directly, avoiding the need to form
+the p x p LD matrix (memory and compute savings when n << p).
 }

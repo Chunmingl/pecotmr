@@ -974,3 +974,290 @@ test_that("RAISS handles single-block list correctly", {
     info = "Z-scores should match for single block"
   )
 })
+
+# ============================================================================
+# Tests for SVD-based genotype matrix path (raiss_single_matrix_from_X)
+# ============================================================================
+
+#' Helper: generate a genotype matrix X with corresponding ref_panel,
+#' known_zscores, and LD matrix R for equivalence testing.
+generate_X_test_data <- function(n = 200, p = 100, n_known = 50, seed = 42) {
+  set.seed(seed)
+  # Generate genotype-like matrix (dosages 0/1/2)
+  X_raw <- matrix(sample(0:2, n * p, replace = TRUE, prob = c(0.25, 0.5, 0.25)),
+                  nrow = n, ncol = p)
+  # Center and scale
+  X <- scale(X_raw)
+  X[is.na(X)] <- 0  # zero-variance columns become 0
+
+  # ref_panel for all p variants
+  ref_panel <- data.frame(
+    chrom = rep(1, p),
+    pos = seq(1, p * 10, 10),
+    variant_id = paste0("rs", seq_len(p)),
+    A1 = sample(c("A", "T", "G", "C"), p, replace = TRUE),
+    A2 = sample(c("A", "T", "G", "C"), p, replace = TRUE),
+    stringsAsFactors = FALSE
+  )
+  colnames(X) <- ref_panel$variant_id
+
+  # Select known variants
+  known_idx <- sort(sample(seq_len(p), n_known))
+  known_zscores <- data.frame(
+    chrom = rep(1, n_known),
+    pos = ref_panel$pos[known_idx],
+    variant_id = ref_panel$variant_id[known_idx],
+    A1 = ref_panel$A1[known_idx],
+    A2 = ref_panel$A2[known_idx],
+    z = rnorm(n_known),
+    stringsAsFactors = FALSE
+  )
+
+  # LD matrix from X
+  R <- cor(X_raw)
+  R[is.na(R)] <- 0
+  colnames(R) <- rownames(R) <- ref_panel$variant_id
+
+  list(X = X, R = R, ref_panel = ref_panel, known_zscores = known_zscores,
+       n = n, p = p, n_known = n_known)
+}
+
+test_that("safe_svd basic functionality", {
+  set.seed(1)
+  mat <- matrix(rnorm(20), nrow = 5, ncol = 4)
+  s <- safe_svd(mat)
+  expect_equal(length(s$d), min(5, 4))
+  expect_true(all(s$d > 0))
+  # Reconstruct
+  reconstructed <- s$u %*% diag(s$d) %*% t(s$v)
+  expect_equal(mat, reconstructed, tolerance = 1e-10)
+})
+
+test_that("safe_svd filters small singular values", {
+  set.seed(2)
+  # Create rank-2 matrix
+  u <- matrix(rnorm(10), nrow = 5, ncol = 2)
+  v <- matrix(rnorm(8), nrow = 4, ncol = 2)
+  mat <- u %*% t(v) + matrix(rnorm(20) * 1e-12, nrow = 5, ncol = 4)
+  s <- safe_svd(mat, tol = 1e-6)
+  expect_equal(length(s$d), 2)
+})
+
+test_that("safe_svd max_rank works", {
+  set.seed(3)
+  mat <- matrix(rnorm(50), nrow = 10, ncol = 5)
+  s <- safe_svd(mat, max_rank = 2)
+  expect_equal(length(s$d), 2)
+  expect_equal(ncol(s$u), 2)
+  expect_equal(ncol(s$v), 2)
+})
+
+test_that("safe_svd rejects all-zero matrix", {
+  mat <- matrix(0, nrow = 5, ncol = 3)
+  expect_error(safe_svd(mat), "all-zero")
+})
+
+test_that("X path matches R path: basic equivalence (n > p)", {
+  data <- generate_X_test_data(n = 200, p = 100, n_known = 50, seed = 42)
+
+  result_R <- raiss(data$ref_panel, data$known_zscores, LD_matrix = data$R,
+                    lamb = 0.01, rcond = 0.01, R2_threshold = 0, minimum_ld = 0,
+                    verbose = FALSE)
+  result_X <- raiss(data$ref_panel, data$known_zscores, genotype_matrix = data$X,
+                    lamb = 0.01, svd_tol = 1e-12, R2_threshold = 0, minimum_ld = 0,
+                    verbose = FALSE)
+
+  # Compare imputed z-scores (sort by variant_id for alignment)
+  r_sorted <- result_R$result_nofilter %>% arrange(variant_id)
+  x_sorted <- result_X$result_nofilter %>% arrange(variant_id)
+
+  expect_equal(r_sorted$z, x_sorted$z, tolerance = 1e-4,
+               info = "Imputed z-scores should match between X and R paths")
+  expect_equal(r_sorted$Var, x_sorted$Var, tolerance = 1e-4,
+               info = "Variance should match between X and R paths")
+  expect_equal(r_sorted$raiss_ld_score, x_sorted$raiss_ld_score, tolerance = 1e-4,
+               info = "LD scores should match between X and R paths")
+})
+
+test_that("X path matches R path: n < p regime", {
+  data <- generate_X_test_data(n = 50, p = 200, n_known = 100, seed = 123)
+
+  result_R <- raiss(data$ref_panel, data$known_zscores, LD_matrix = data$R,
+                    lamb = 0.01, rcond = 0.01, R2_threshold = 0, minimum_ld = 0,
+                    verbose = FALSE)
+  result_X <- raiss(data$ref_panel, data$known_zscores, genotype_matrix = data$X,
+                    lamb = 0.01, svd_tol = 1e-12, R2_threshold = 0, minimum_ld = 0,
+                    verbose = FALSE)
+
+  r_sorted <- result_R$result_nofilter %>% arrange(variant_id)
+  x_sorted <- result_X$result_nofilter %>% arrange(variant_id)
+
+  expect_equal(r_sorted$z, x_sorted$z, tolerance = 1e-4,
+               info = "z-scores should match in n < p regime")
+  expect_equal(r_sorted$Var, x_sorted$Var, tolerance = 1e-4,
+               info = "Variance should match in n < p regime")
+})
+
+test_that("X path matches R path: n >> p regime", {
+  data <- generate_X_test_data(n = 500, p = 50, n_known = 25, seed = 99)
+
+  result_R <- raiss(data$ref_panel, data$known_zscores, LD_matrix = data$R,
+                    lamb = 0.01, rcond = 0.01, R2_threshold = 0, minimum_ld = 0,
+                    verbose = FALSE)
+  result_X <- raiss(data$ref_panel, data$known_zscores, genotype_matrix = data$X,
+                    lamb = 0.01, svd_tol = 1e-12, R2_threshold = 0, minimum_ld = 0,
+                    verbose = FALSE)
+
+  r_sorted <- result_R$result_nofilter %>% arrange(variant_id)
+  x_sorted <- result_X$result_nofilter %>% arrange(variant_id)
+
+  expect_equal(r_sorted$z, x_sorted$z, tolerance = 1e-4)
+  expect_equal(r_sorted$Var, x_sorted$Var, tolerance = 1e-4)
+})
+
+test_that("X path matches R path: varying lambda", {
+  data <- generate_X_test_data(n = 150, p = 80, n_known = 40, seed = 7)
+
+  for (lamb in c(0.001, 0.01, 0.1)) {
+    result_R <- raiss(data$ref_panel, data$known_zscores, LD_matrix = data$R,
+                      lamb = lamb, rcond = 0.01, R2_threshold = 0, minimum_ld = 0,
+                      verbose = FALSE)
+    result_X <- raiss(data$ref_panel, data$known_zscores, genotype_matrix = data$X,
+                      lamb = lamb, svd_tol = 1e-12, R2_threshold = 0, minimum_ld = 0,
+                      verbose = FALSE)
+
+    r_sorted <- result_R$result_nofilter %>% arrange(variant_id)
+    x_sorted <- result_X$result_nofilter %>% arrange(variant_id)
+
+    expect_equal(r_sorted$z, x_sorted$z, tolerance = 1e-4,
+                 info = paste("z-scores should match for lamb =", lamb))
+    expect_equal(r_sorted$Var, x_sorted$Var, tolerance = 1e-4,
+                 info = paste("Variance should match for lamb =", lamb))
+  }
+})
+
+test_that("X path handles all-known edge case", {
+  data <- generate_X_test_data(n = 100, p = 50, n_known = 50, seed = 10)
+  # Make all variants known
+  all_known <- data.frame(
+    chrom = data$ref_panel$chrom,
+    pos = data$ref_panel$pos,
+    variant_id = data$ref_panel$variant_id,
+    A1 = data$ref_panel$A1,
+    A2 = data$ref_panel$A2,
+    z = rnorm(nrow(data$ref_panel)),
+    stringsAsFactors = FALSE
+  )
+  result <- raiss(data$ref_panel, all_known, genotype_matrix = data$X,
+                  verbose = FALSE)
+  expect_equal(nrow(result$result_nofilter), nrow(data$ref_panel))
+})
+
+test_that("X path handles single unknown variant", {
+  data <- generate_X_test_data(n = 100, p = 50, n_known = 49, seed = 15)
+
+  result_R <- raiss(data$ref_panel, data$known_zscores, LD_matrix = data$R,
+                    lamb = 0.01, rcond = 0.01, R2_threshold = 0, minimum_ld = 0,
+                    verbose = FALSE)
+  result_X <- raiss(data$ref_panel, data$known_zscores, genotype_matrix = data$X,
+                    lamb = 0.01, svd_tol = 1e-12, R2_threshold = 0, minimum_ld = 0,
+                    verbose = FALSE)
+
+  r_sorted <- result_R$result_nofilter %>% arrange(variant_id)
+  x_sorted <- result_X$result_nofilter %>% arrange(variant_id)
+
+  expect_equal(r_sorted$z, x_sorted$z, tolerance = 1e-4)
+})
+
+test_that("X path handles single known variant", {
+  data <- generate_X_test_data(n = 100, p = 50, n_known = 1, seed = 20)
+
+  result_X <- raiss(data$ref_panel, data$known_zscores, genotype_matrix = data$X,
+                    lamb = 0.01, svd_tol = 1e-12, R2_threshold = 0, minimum_ld = 0,
+                    verbose = FALSE)
+  expect_true(is.data.frame(result_X$result_nofilter))
+  expect_equal(nrow(result_X$result_nofilter), nrow(data$ref_panel))
+})
+
+test_that("X path R2 filtering matches R path", {
+  data <- generate_X_test_data(n = 200, p = 100, n_known = 50, seed = 42)
+
+  result_R <- raiss(data$ref_panel, data$known_zscores, LD_matrix = data$R,
+                    lamb = 0.01, rcond = 0.01, R2_threshold = 0.6, minimum_ld = 5,
+                    verbose = FALSE)
+  result_X <- raiss(data$ref_panel, data$known_zscores, genotype_matrix = data$X,
+                    lamb = 0.01, svd_tol = 1e-12, R2_threshold = 0.6, minimum_ld = 5,
+                    verbose = FALSE)
+
+  # Same variants should pass filtering
+  r_filtered_ids <- sort(result_R$result_filter$variant_id)
+  x_filtered_ids <- sort(result_X$result_filter$variant_id)
+  expect_equal(r_filtered_ids, x_filtered_ids,
+               info = "Same variants should pass R2/LD filtering")
+})
+
+test_that("raiss rejects both LD_matrix and genotype_matrix", {
+  data <- generate_X_test_data(n = 50, p = 20, n_known = 10, seed = 1)
+  expect_error(
+    raiss(data$ref_panel, data$known_zscores,
+          LD_matrix = data$R, genotype_matrix = data$X),
+    "not both"
+  )
+})
+
+test_that("raiss rejects neither LD_matrix nor genotype_matrix", {
+  data <- generate_X_test_data(n = 50, p = 20, n_known = 10, seed = 1)
+  expect_error(
+    raiss(data$ref_panel, data$known_zscores),
+    "Provide either"
+  )
+})
+
+test_that("X path with collinear variants matches R path", {
+  set.seed(55)
+  n <- 150
+  p <- 60
+  # Create X with some near-duplicate columns
+  X_raw <- matrix(sample(0:2, n * p, replace = TRUE, prob = c(0.25, 0.5, 0.25)),
+                  nrow = n, ncol = p)
+  # Make columns 5 and 6 nearly identical
+  X_raw[, 6] <- X_raw[, 5] + sample(c(0, 0, 0, 0, 1), n, replace = TRUE)
+  X_raw[X_raw > 2] <- 2
+
+  X <- scale(X_raw)
+  X[is.na(X)] <- 0
+
+  ref_panel <- data.frame(
+    chrom = rep(1, p), pos = seq(1, p * 10, 10),
+    variant_id = paste0("rs", seq_len(p)),
+    A1 = rep("A", p), A2 = rep("G", p),
+    stringsAsFactors = FALSE
+  )
+  colnames(X) <- ref_panel$variant_id
+
+  n_known <- 30
+  known_idx <- sort(sample(seq_len(p), n_known))
+  known_zscores <- data.frame(
+    chrom = rep(1, n_known), pos = ref_panel$pos[known_idx],
+    variant_id = ref_panel$variant_id[known_idx],
+    A1 = ref_panel$A1[known_idx], A2 = ref_panel$A2[known_idx],
+    z = rnorm(n_known), stringsAsFactors = FALSE
+  )
+
+  R <- cor(X_raw)
+  R[is.na(R)] <- 0
+  colnames(R) <- rownames(R) <- ref_panel$variant_id
+
+  result_R <- raiss(ref_panel, known_zscores, LD_matrix = R,
+                    lamb = 0.01, rcond = 0.01, R2_threshold = 0, minimum_ld = 0,
+                    verbose = FALSE)
+  result_X <- raiss(ref_panel, known_zscores, genotype_matrix = X,
+                    lamb = 0.01, svd_tol = 1e-12, R2_threshold = 0, minimum_ld = 0,
+                    verbose = FALSE)
+
+  r_sorted <- result_R$result_nofilter %>% arrange(variant_id)
+  x_sorted <- result_X$result_nofilter %>% arrange(variant_id)
+
+  expect_equal(r_sorted$z, x_sorted$z, tolerance = 1e-3,
+               info = "Collinear case: z-scores should be close")
+})

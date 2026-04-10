@@ -133,6 +133,58 @@ mean_impute <- function(geno) {
 
 is_zero_variance <- function(x) length(unique(x)) == 1
 
+#' Safe truncated SVD with numerical stability
+#'
+#' Computes a thin SVD and optionally truncates small singular values.
+#' Useful for avoiding numerical issues when working with rank-deficient
+#' or near-singular matrices.
+#'
+#' @param mat Input matrix (n x p).
+#' @param tol Relative tolerance for filtering singular values.
+#'   Singular values smaller than \code{tol * max(d)} are discarded.
+#'   Set to 0 to keep all singular values.
+#' @param max_rank Optional maximum number of singular values to retain.
+#'   If NULL, all singular values passing the tolerance filter are kept.
+#' @return A list with components:
+#'   \describe{
+#'     \item{u}{Left singular vectors (n x r matrix).}
+#'     \item{d}{Singular values (length-r numeric vector).}
+#'     \item{v}{Right singular vectors (p x r matrix).}
+#'   }
+#'   where r is the number of retained singular values.
+#' @noRd
+safe_svd <- function(mat, tol = 1e-8, max_rank = NULL) {
+  if (all(mat == 0)) {
+    stop("Cannot compute SVD of an all-zero matrix.")
+  }
+  # Compute thin SVD
+  s <- svd(mat)
+  d <- s$d
+  # Filter by relative tolerance
+  if (tol > 0 && length(d) > 0) {
+    keep <- d / d[1] > tol
+    if (!any(keep)) {
+      stop("All singular values are below the tolerance threshold.")
+    }
+  } else {
+    keep <- rep(TRUE, length(d))
+  }
+  # Apply max_rank cap
+  if (!is.null(max_rank) && max_rank > 0) {
+    n_keep <- min(sum(keep), max_rank)
+    keep_idx <- which(keep)
+    if (length(keep_idx) > n_keep) {
+      keep[keep_idx[(n_keep + 1):length(keep_idx)]] <- FALSE
+    }
+  }
+  r <- sum(keep)
+  list(
+    u = s$u[, keep, drop = FALSE],
+    d = d[keep],
+    v = s$v[, keep, drop = FALSE]
+  )
+}
+
 #' Compute LD (Linkage Disequilibrium) Correlation Matrix from Genotypes
 #'
 #' Computes a pairwise Pearson correlation matrix from a genotype matrix.

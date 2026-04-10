@@ -78,6 +78,124 @@ raiss_single_matrix <- function(ref_panel, known_zscores, LD_matrix, lamb = 0.01
   ))
 }
 
+#' Core RAISS implementation from a genotype matrix X (SVD-based)
+#'
+#' Performs the same imputation as \code{raiss_single_matrix} but works directly
+#' with the genotype matrix X instead of the LD correlation matrix R. This avoids
+#' forming the p x p LD matrix, saving O(p^2) memory and O(np^2) compute.
+#'
+#' The reformulation is mathematically exact: using the thin SVD of X_t (the known
+#' variant columns), all RAISS quantities (mu, var, ld_score) are computed in the
+#' SVD basis without ever forming R = X'X/(n-1).
+#'
+#' @param ref_panel A data frame containing 'chrom', 'pos', 'variant_id', 'A1', and 'A2'.
+#' @param known_zscores A data frame containing 'chrom', 'pos', 'variant_id', 'A1', 'A2', and 'z' values.
+#' @param X Centered and scaled genotype matrix (n_samples x p_variants). Column order must
+#'   match the variant order in ref_panel.
+#' @param lamb Regularization term (same role as in the LD-based path).
+#' @param svd_tol Relative tolerance for filtering small singular values in the SVD of X_t.
+#' @param R2_threshold R square threshold below which SNPs are filtered from the output.
+#' @param minimum_ld Minimum LD score threshold for SNP filtering.
+#' @param verbose Logical indicating whether to print progress information.
+#'
+#' @return A list containing filtered and unfiltered results, and LD_mat = NULL.
+#' @importFrom dplyr arrange
+#' @noRd
+raiss_single_matrix_from_X <- function(ref_panel, known_zscores, X, lamb = 0.01,
+                                        svd_tol = 1e-8, R2_threshold = 0.6,
+                                        minimum_ld = 5, verbose = TRUE) {
+  # Check that ref_panel and known_zscores are both increasing in terms of pos
+  if (is.unsorted(ref_panel$pos) || is.unsorted(known_zscores$pos)) {
+    stop("ref_panel and known_zscores must be in increasing order of pos.")
+  }
+
+  n_samples <- nrow(X)
+
+  # Define knowns and unknowns (same logic as raiss_single_matrix)
+  knowns_id <- intersect(known_zscores$variant_id, ref_panel$variant_id)
+  knowns <- which(ref_panel$variant_id %in% knowns_id)
+  unknowns <- which(!ref_panel$variant_id %in% knowns_id)
+
+  # Handle edge cases
+  if (length(knowns) == 0) {
+    if (verbose) message("No known variants found, cannot perform imputation.")
+    return(NULL)
+  }
+
+  if (length(unknowns) == 0) {
+    if (verbose) message("No unknown variants to impute, returning known variants.")
+    return(list(
+      result_nofilter = known_zscores,
+      result_filter = known_zscores,
+      LD_mat = NULL
+    ))
+  }
+
+  # Partition genotype matrix by known/unknown columns
+  X_t <- X[, knowns, drop = FALSE]
+  X_i <- X[, unknowns, drop = FALSE]
+  zt <- known_zscores$z
+
+  # Compute thin SVD of X_t
+  svd_result <- safe_svd(X_t, tol = svd_tol)
+  U <- svd_result$u   # n x r
+  d <- svd_result$d    # length r
+  V <- svd_result$v    # k x r
+
+  # Regularization constant: c = lamb * (n - 1)
+  c_reg <- lamb * (n_samples - 1)
+
+  # --- Imputed z-scores (mu) ---
+  # mu = X_i' U diag(d / (d^2 + c)) V' zt
+  Vt_zt <- crossprod(V, zt)                       # r x 1
+  d_weights_mu <- d / (d^2 + c_reg)               # r x 1
+  w <- U %*% (d_weights_mu * Vt_zt)               # n x 1
+  mu <- as.numeric(crossprod(X_i, w))              # m x 1
+
+  # --- Variance ---
+  # A = X_i' U  (m x r)
+  # var = (1 + lamb) - (1/(n-1)) * (A^2 %*% (d^2 / (d^2 + c)))
+  A <- crossprod(X_i, U)                           # m x r
+  d_weights_var <- d^2 / (d^2 + c_reg)            # r x 1
+  var_raw <- (1 + lamb) - (1 / (n_samples - 1)) * as.numeric(A^2 %*% d_weights_var)
+
+  # --- LD score ---
+  # raiss_ld_score = (1/(n-1))^2 * (A^2 %*% d^2)
+  raiss_ld_score <- as.numeric(A^2 %*% d^2) / (n_samples - 1)^2
+
+  # --- Condition number and inversion check ---
+  condition_number <- rep(d[1] / d[length(d)], length(unknowns))
+  correct_inversion <- rep(TRUE, length(unknowns))
+
+  # --- R2 correction (same as raiss_model) ---
+  var_norm <- var_in_boundaries(var_raw, lamb)
+  R2 <- (1 + lamb) - var_norm
+  mu <- mu / sqrt(R2)
+
+  # Package results in the same format as raiss_model output
+  imp <- list(
+    var = var_norm,
+    mu = mu,
+    raiss_ld_score = raiss_ld_score,
+    condition_number = condition_number,
+    correct_inversion = correct_inversion
+  )
+
+  # Reuse existing formatting and filtering functions
+  results <- format_raiss_df(imp, ref_panel, unknowns)
+  results <- filter_raiss_output(results, R2_threshold, minimum_ld, verbose)
+
+  # Merge with known z-scores
+  result_nofilter <- merge_raiss_df(results$zscores_nofilter, known_zscores) %>% arrange(pos)
+  result_filter <- merge_raiss_df(results$zscores, known_zscores) %>% arrange(pos)
+
+  return(list(
+    result_nofilter = result_nofilter,
+    result_filter = result_filter,
+    LD_mat = NULL
+  ))
+}
+
 #' Robust and accurate imputation from summary statistics
 #'
 #' This function is a part of the statistical library for SNP imputation from:
@@ -89,21 +207,80 @@ raiss_single_matrix <- function(ref_panel, known_zscores, LD_matrix, lamb = 0.01
 #'
 #' This function can process either a single LD matrix or a list of LD matrices for different blocks.
 #' For a list of matrices, it processes each block separately and combines the results.
+#' Alternatively, it can accept a genotype matrix X directly, avoiding the need to form
+#' the p x p LD matrix (memory and compute savings when n << p).
 #'
 #' @param ref_panel A data frame containing 'chrom', 'pos', 'variant_id', 'A1', and 'A2'.
 #' @param known_zscores A data frame containing 'chrom', 'pos', 'variant_id', 'A1', 'A2', and 'z' values.
 #' @param LD_matrix Either a square matrix or a list of matrices for LD blocks.
+#'   Provide either \code{LD_matrix} or \code{genotype_matrix}, not both.
+#' @param genotype_matrix A centered and scaled genotype matrix (n x p) as an alternative
+#'   to \code{LD_matrix}. Column order must match the variant order in \code{ref_panel}.
+#'   When provided, the imputation uses an SVD-based approach that avoids forming the
+#'   p x p LD matrix.
 #' @param lamb Regularization term added to the diagonal of the LD_matrix.
-#' @param rcond Threshold for filtering eigenvalues in the pseudo-inverse computation.
+#' @param rcond Threshold for filtering eigenvalues in the pseudo-inverse computation
+#'   (only used with LD_matrix path).
+#' @param svd_tol Relative tolerance for filtering small singular values
+#'   (only used with genotype_matrix path).
 #' @param R2_threshold R square threshold below which SNPs are filtered from the output.
 #' @param minimum_ld Minimum LD score threshold for SNP filtering.
 #' @param verbose Logical indicating whether to print progress information.
 #'
-#' @return A list containing filtered and unfiltered results, and filtered LD matrix.
+#' @return A list containing filtered and unfiltered results, and filtered LD matrix
+#'   (LD_mat is NULL when using genotype_matrix path).
 #' @importFrom dplyr arrange bind_rows
 #' @export
-raiss <- function(ref_panel, known_zscores, LD_matrix, lamb = 0.01, rcond = 0.01,
-                  R2_threshold = 0.6, minimum_ld = 5, verbose = TRUE) {
+raiss <- function(ref_panel, known_zscores, LD_matrix = NULL,
+                  genotype_matrix = NULL, lamb = 0.01, rcond = 0.01,
+                  svd_tol = 1e-8, R2_threshold = 0.6, minimum_ld = 5,
+                  verbose = TRUE) {
+  # --- Genotype matrix path (SVD-based, avoids forming R) ---
+  if (!is.null(genotype_matrix)) {
+    if (!is.null(LD_matrix)) {
+      stop("Provide either LD_matrix or genotype_matrix, not both.")
+    }
+    if (is.matrix(genotype_matrix)) {
+      if (verbose) message("Processing genotype matrix via SVD-based imputation...")
+      return(raiss_single_matrix_from_X(
+        ref_panel, known_zscores, genotype_matrix,
+        lamb, svd_tol, R2_threshold, minimum_ld, verbose
+      ))
+    }
+    if (is.list(genotype_matrix)) {
+      # List of genotype matrices (block processing)
+      if (verbose) message("Processing multiple genotype matrix blocks via SVD-based imputation...")
+      results_list <- list()
+      for (i in seq_along(genotype_matrix)) {
+        if (verbose) message(paste("Processing block", i, "of", length(genotype_matrix)))
+        block_result <- raiss_single_matrix_from_X(
+          ref_panel, known_zscores, genotype_matrix[[i]],
+          lamb, svd_tol, R2_threshold, minimum_ld,
+          verbose = FALSE
+        )
+        if (!is.null(block_result)) {
+          results_list[[length(results_list) + 1]] <- block_result
+        }
+      }
+      if (length(results_list) == 0) {
+        if (verbose) message("No blocks could be processed.")
+        return(NULL)
+      }
+      combined_nofilter <- do.call(bind_rows, lapply(results_list, `[[`, "result_nofilter"))
+      combined_filter <- do.call(bind_rows, lapply(results_list, `[[`, "result_filter"))
+      return(list(
+        result_nofilter = combined_nofilter %>% arrange(pos),
+        result_filter = combined_filter %>% arrange(pos),
+        LD_mat = NULL
+      ))
+    }
+    stop("genotype_matrix must be a matrix or a list of matrices.")
+  }
+
+  # --- LD matrix path (original implementation) ---
+  if (is.null(LD_matrix)) {
+    stop("Provide either LD_matrix or genotype_matrix.")
+  }
   # Determine if we can process as a single matrix
   is_single_matrix_case <- is.matrix(LD_matrix) ||
     (is.list(LD_matrix) && !is.null(LD_matrix$ld_matrices) &&
